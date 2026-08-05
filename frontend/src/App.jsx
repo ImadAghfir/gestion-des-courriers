@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 const API_URL = "http://127.0.0.1:8000/api";
 
 const formulaireInitial = {
+  typeCourrier: "entrant",
   objet: "",
   expediteur: "",
+  destinataire: "",
   categorie: "Administratif",
   priorite: "normal",
   description: "",
@@ -81,9 +83,10 @@ function App() {
     setChargement(true);
 
     const donnees = {
-      type_courrier: "entrant",
+      type_courrier: formulaire.typeCourrier,
       objet: formulaire.objet,
       expediteur: formulaire.expediteur,
+      destinataire: formulaire.destinataire,
       categorie: formulaire.categorie,
       priorite: formulaire.priorite,
       description: formulaire.description,
@@ -210,10 +213,25 @@ function App() {
 
       {afficherFormulaire && (
         <section className="carte formulaire">
-          <h2>Nouveau courrier entrant</h2>
+          <h2>
+  Nouveau courrier{" "}
+  {formulaire.typeCourrier === "entrant" ? "entrant" : "sortant"}
+</h2>
 
           <form onSubmit={creerCourrier}>
             <div className="grille">
+            <div>
+  <label htmlFor="typeCourrier">Type de courrier *</label>
+  <select
+    id="typeCourrier"
+    name="typeCourrier"
+    value={formulaire.typeCourrier}
+    onChange={modifierFormulaire}
+  >
+    <option value="entrant">Courrier entrant</option>
+    <option value="sortant">Courrier sortant</option>
+  </select>
+</div>
               <div>
                 <label htmlFor="objet">Objet *</label>
                 <input
@@ -225,16 +243,29 @@ function App() {
                 />
               </div>
 
-              <div>
-                <label htmlFor="expediteur">Expéditeur *</label>
-                <input
-                  id="expediteur"
-                  name="expediteur"
-                  value={formulaire.expediteur}
-                  onChange={modifierFormulaire}
-                  required
-                />
-              </div>
+              {formulaire.typeCourrier === "entrant" ? (
+  <div>
+    <label htmlFor="expediteur">Expéditeur *</label>
+    <input
+      id="expediteur"
+      name="expediteur"
+      value={formulaire.expediteur}
+      onChange={modifierFormulaire}
+      required
+    />
+  </div>
+) : (
+  <div>
+    <label htmlFor="destinataire">Destinataire *</label>
+    <input
+      id="destinataire"
+      name="destinataire"
+      value={formulaire.destinataire}
+      onChange={modifierFormulaire}
+      required
+    />
+  </div>
+)}
 
               <div>
                 <label htmlFor="categorie">Catégorie *</label>
