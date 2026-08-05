@@ -8,7 +8,7 @@ class Notification(models.Model):
         WARNING = "warning", "Avertissement"
         URGENT = "urgent", "Urgent"
 
-    utilisateur = models.ForeignKey(
+    destinataire = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="notifications",
@@ -33,4 +33,4 @@ class Notification(models.Model):
         ordering = ["-date"]
 
     def __str__(self):
-        return f"{self.get_type_display()} - {self.utilisateur.username}"
+        return f"{self.get_type_display()} - {self.destinataire.username}"

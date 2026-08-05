@@ -10,5 +10,5 @@ class CourrierSerializer(serializers.ModelSerializer):
             "numero",
             "statut",
             "date_creation",
-            "cree_par",
+            "createur",
         )

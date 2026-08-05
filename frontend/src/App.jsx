@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_URL = "http://127.0.0.1:8000/api";
+const API_URL = "/api";
 
 const formulaireInitial = {
   typeCourrier: "entrant",
@@ -18,6 +18,7 @@ function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState("");
+  const [role, setRole] = useState("");
   const [courriers, setCourriers] = useState([]);
   const [formulaire, setFormulaire] = useState(formulaireInitial);
   const [afficherFormulaire, setAfficherFormulaire] = useState(false);
@@ -25,16 +26,35 @@ function App() {
   const [message, setMessage] = useState("");
   const [chargement, setChargement] = useState(false);
 
+  // Helper centralisé : attache le token, gère l'expiration (401)
+  async function apiFetch(url, options = {}, accessToken) {
+    const tok = accessToken || token;
+    const headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    };
+    if (tok) headers["Authorization"] = `Bearer ${tok}`;
+
+    const response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401) {
+      // Token expiré ou invalide → déconnexion automatique
+      localStorage.removeItem("access_token");
+      setToken("");
+      setRole("");
+      setCourriers([]);
+      setUsername("");
+      throw new Error("Session expirée. Veuillez vous reconnecter.");
+    }
+    return response;
+  }
+
   async function chargerCourriers(accessToken) {
     setChargement(true);
     setErreur("");
 
     try {
-      const response = await fetch(`${API_URL}/courriers/`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const response = await apiFetch(`${API_URL}/courriers/`, {}, accessToken);
 
       if (!response.ok) {
         throw new Error("Impossible de charger les courriers.");
@@ -45,6 +65,15 @@ function App() {
       setErreur(error.message);
     } finally {
       setChargement(false);
+    }
+  }
+
+  async function chargerProfil(accessToken) {
+    const response = await apiFetch(`${API_URL}/auth/me/`, {}, accessToken);
+
+    if (response.ok) {
+      const donnees = await response.json();
+      setRole(donnees.role);
     }
   }
 
@@ -68,6 +97,7 @@ function App() {
 
       localStorage.setItem("access_token", donnees.access);
       setToken(donnees.access);
+      await chargerProfil(donnees.access);
       setPassword("");
       await chargerCourriers(donnees.access);
     } catch (error) {
@@ -101,12 +131,8 @@ function App() {
     }
 
     try {
-      const response = await fetch(`${API_URL}/courriers/`, {
+      const response = await apiFetch(`${API_URL}/courriers/`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify(donnees),
       });
 
@@ -136,9 +162,33 @@ function App() {
     });
   }
 
+  async function executerAction(courrierId, action, texteSucces) {
+    setErreur("");
+    setMessage("");
+  
+    try {
+      const response = await apiFetch(
+        `${API_URL}/courriers/${courrierId}/${action}/`,
+        { method: "POST" }
+      );
+  
+      const resultat = await response.json();
+  
+      if (!response.ok) {
+        throw new Error(resultat.detail || "Action impossible.");
+      }
+  
+      setMessage(texteSucces);
+      await chargerCourriers(token);
+    } catch (error) {
+      setErreur(error.message);
+    }
+  }
+
   function seDeconnecter() {
     localStorage.removeItem("access_token");
     setToken("");
+    setRole("");
     setCourriers([]);
     setUsername("");
     setMessage("");
@@ -148,8 +198,21 @@ function App() {
     const tokenSauvegarde = localStorage.getItem("access_token");
 
     if (tokenSauvegarde) {
-      setToken(tokenSauvegarde);
-      chargerCourriers(tokenSauvegarde);
+      // Valider le token en appelant /auth/me/ avant de l'utiliser
+      fetch(`${API_URL}/auth/me/`, {
+        headers: { Authorization: `Bearer ${tokenSauvegarde}` },
+      }).then((res) => {
+        if (res.ok) {
+          return res.json().then((donnees) => {
+            setToken(tokenSauvegarde);
+            setRole(donnees.role);
+            chargerCourriers(tokenSauvegarde);
+          });
+        } else {
+          // Token invalide ou expiré → on nettoie
+          localStorage.removeItem("access_token");
+        }
+      });
     }
   }, []);
 
@@ -347,6 +410,7 @@ function App() {
                 <th>Objet</th>
                 <th>Priorité</th>
                 <th>Statut</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -357,6 +421,40 @@ function App() {
                   <td>{courrier.objet}</td>
                   <td>{courrier.priorite}</td>
                   <td>{courrier.statut}</td>
+                  <td>
+  {courrier.type_courrier === "sortant" &&
+    courrier.statut === "brouillon" && (
+      <button
+        className="petit-bouton"
+        onClick={() =>
+          executerAction(
+            courrier.id,
+            "soumettre_validation",
+            "Courrier soumis pour validation."
+          )
+        }
+      >
+        Soumettre
+      </button>
+    )}
+
+  {courrier.type_courrier === "sortant" &&
+    courrier.statut === "en_validation" &&
+    (role === "admin" || role === "responsable") && (
+      <button
+        className="petit-bouton"
+        onClick={() =>
+          executerAction(
+            courrier.id,
+            "valider",
+            "Courrier validé avec succès."
+          )
+        }
+      >
+        Valider
+      </button>
+    )}
+</td>
                 </tr>
               ))}
             </tbody>

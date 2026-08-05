@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -14,16 +15,16 @@ class Courrier(models.Model):
         TRES_URGENT = "tres_urgent", "Tres urgent"
 
     class Statut(models.TextChoices):
-        RECU = "recu", "Recu"
-        AFFECTE = "affecte", "Affecte"
+        RECU = "recu", "Reçu"
+        AFFECTE = "affecte", "Affecté"
         EN_COURS = "en_cours", "En cours"
         EN_ATTENTE = "en_attente", "En attente"
-        TRAITE = "traite", "Traite"
-        ARCHIVE = "archive", "Archive"
+        TRAITE = "traite", "Traité"
+        ARCHIVE = "archive", "Archivé"
         BROUILLON = "brouillon", "Brouillon"
         EN_VALIDATION = "en_validation", "En validation"
-        VALIDE = "valide", "Valide"
-        ENVOYE = "envoye", "Envoye"
+        VALIDE = "valide", "Validé"
+        ENVOYE = "envoye", "Envoyé"
 
     numero = models.CharField(max_length=20, unique=True, blank=True)
     type_courrier = models.CharField(
@@ -57,7 +58,7 @@ class Courrier(models.Model):
         blank=True,
         related_name="courriers",
     )
-    cree_par = models.ForeignKey(
+    createur = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="courriers_crees",
@@ -66,7 +67,45 @@ class Courrier(models.Model):
     class Meta:
         ordering = ["-date_creation"]
 
+    # ------------------------------------------------------------------
+    # Règles métier au niveau modèle (deuxième barrière après le service)
+    # ------------------------------------------------------------------
+
+    def clean(self):
+        """
+        Validation au niveau modèle.
+
+        Ces contrôles doublent le service Python pour garantir l'intégrité
+        même en cas d'accès direct à l'ORM (shell, scripts de migration…).
+        """
+        # Règle : numéro immuable après création
+        if self.pk:
+            try:
+                original = Courrier.objects.get(pk=self.pk)
+                if original.numero and self.numero != original.numero:
+                    raise ValidationError(
+                        {"numero": "Le numéro d'un courrier ne peut pas être modifié après sa création."}
+                    )
+            except Courrier.DoesNotExist:
+                pass
+
+        # Règle : un courrier entrant ne peut être archivé que depuis TRAITE
+        if (
+            self.pk
+            and self.type_courrier == self.TypeCourrier.ENTRANT
+            and self.statut == self.Statut.ARCHIVE
+        ):
+            try:
+                original = Courrier.objects.get(pk=self.pk)
+                if original.statut != self.Statut.TRAITE:
+                    raise ValidationError(
+                        {"statut": "Un courrier entrant ne peut être archivé que s'il est traité."}
+                    )
+            except Courrier.DoesNotExist:
+                pass
+
     def save(self, *args, **kwargs):
+        # Génération automatique du numéro à la création uniquement
         if not self.numero:
             annee = timezone.now().year
             prefixe = "CE" if self.type_courrier == self.TypeCourrier.ENTRANT else "CS"
@@ -77,6 +116,7 @@ class Courrier(models.Model):
             sequence = int(dernier.numero.split("-")[-1]) + 1 if dernier else 1
             self.numero = f"{prefixe}-{annee}-{sequence:05d}"
 
+        # Statut initial par défaut
         if not self.statut:
             self.statut = (
                 self.Statut.RECU
@@ -87,4 +127,4 @@ class Courrier(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.numero} - {self.objet}"
+        return f"{self.numero} - {self.objet}"

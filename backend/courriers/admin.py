@@ -6,7 +6,7 @@ from .models import Courrier
 class CourrierAdmin(admin.ModelAdmin):
     list_display = (
         "numero", "type_courrier", "objet", "priorite",
-        "statut", "service", "cree_par", "date_creation",
+        "statut", "service", "createur", "date_creation",
     )
     list_filter = ("type_courrier", "priorite", "statut", "service")
     search_fields = ("numero", "objet", "expediteur", "destinataire")

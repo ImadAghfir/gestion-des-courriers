@@ -23,7 +23,7 @@ class Affectation(models.Model):
         blank=True,
         related_name="affectations_recues",
     )
-    affecte_par = models.ForeignKey(
+    auteur = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="affectations_effectuees",

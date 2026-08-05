@@ -1,18 +1,13 @@
-from django.conf import settings
+from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
-class ProfilUtilisateur(models.Model):
+class Utilisateur(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "admin", "Administrateur"
         RESPONSABLE = "responsable", "Responsable"
         AGENT = "agent", "Agent"
 
-    utilisateur = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="profil",
-    )
     role = models.CharField(
         max_length=20,
         choices=Role.choices,
@@ -23,10 +18,8 @@ class ProfilUtilisateur(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="profils",
+        related_name="utilisateurs",
     )
-    actif = models.BooleanField(default=True)
-    date_creation = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.utilisateur.username} - {self.get_role_display()}"
+        return f"{self.username} - {self.get_role_display()}"
