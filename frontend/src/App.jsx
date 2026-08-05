@@ -1,122 +1,177 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react";
+
+const API_URL = "http://127.0.0.1:8000/api";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [token, setToken] = useState("");
+  const [courriers, setCourriers] = useState([]);
+  const [erreur, setErreur] = useState("");
+  const [chargement, setChargement] = useState(false);
+
+  async function chargerCourriers(accessToken) {
+    setChargement(true);
+    setErreur("");
+
+    try {
+      const response = await fetch(`${API_URL}/courriers/`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Impossible de charger les courriers.");
+      }
+
+      const donnees = await response.json();
+      setCourriers(donnees);
+    } catch (error) {
+      setErreur(error.message);
+    } finally {
+      setChargement(false);
+    }
+  }
+
+  async function seConnecter(event) {
+    event.preventDefault();
+    setErreur("");
+    setChargement(true);
+
+    try {
+      const response = await fetch(`${API_URL}/auth/login/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username,
+          password,
+        }),
+      });
+
+      const donnees = await response.json();
+
+      if (!response.ok) {
+        throw new Error("Nom d'utilisateur ou mot de passe incorrect.");
+      }
+
+      localStorage.setItem("access_token", donnees.access);
+      setToken(donnees.access);
+      setPassword("");
+
+      await chargerCourriers(donnees.access);
+    } catch (error) {
+      setErreur(error.message);
+      setChargement(false);
+    }
+  }
+
+  function seDeconnecter() {
+    localStorage.removeItem("access_token");
+    setToken("");
+    setCourriers([]);
+    setUsername("");
+  }
+
+  useEffect(() => {
+    const tokenSauvegarde = localStorage.getItem("access_token");
+
+    if (tokenSauvegarde) {
+      setToken(tokenSauvegarde);
+      chargerCourriers(tokenSauvegarde);
+    }
+  }, []);
+
+  if (!token) {
+    return (
+      <main className="conteneur connexion">
+        <section className="carte">
+          <h1>Gestion des courriers</h1>
+          <p>Connectez-vous pour accéder à l’application.</p>
+
+          <form onSubmit={seConnecter}>
+            <label htmlFor="username">Nom d’utilisateur</label>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              required
+            />
+
+            <label htmlFor="password">Mot de passe</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+
+            {erreur && <p className="erreur">{erreur}</p>}
+
+            <button type="submit" disabled={chargement}>
+              {chargement ? "Connexion..." : "Se connecter"}
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
+    <main className="conteneur">
+      <header className="entete">
         <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+          <h1>Tableau de bord</h1>
+          <p>Liste des courriers enregistrés</p>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+
+        <button className="bouton-secondaire" onClick={seDeconnecter}>
+          Se déconnecter
         </button>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
+      {erreur && <p className="erreur">{erreur}</p>}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      {chargement ? (
+        <p>Chargement des courriers...</p>
+      ) : (
+        <section className="carte">
+          <h2>Courriers</h2>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+          {courriers.length === 0 ? (
+            <p>Aucun courrier enregistré.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Numéro</th>
+                  <th>Type</th>
+                  <th>Objet</th>
+                  <th>Priorité</th>
+                  <th>Statut</th>
+                </tr>
+              </thead>
+              <tbody>
+                {courriers.map((courrier) => (
+                  <tr key={courrier.id}>
+                    <td>{courrier.numero}</td>
+                    <td>{courrier.type_courrier}</td>
+                    <td>{courrier.objet}</td>
+                    <td>{courrier.priorite}</td>
+                    <td>{courrier.statut}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+    </main>
+  );
 }
 
-export default App
+export default App;
