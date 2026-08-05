@@ -196,24 +196,47 @@ function App() {
 
   useEffect(() => {
     const tokenSauvegarde = localStorage.getItem("access_token");
-
-    if (tokenSauvegarde) {
-      // Valider le token en appelant /auth/me/ avant de l'utiliser
-      fetch(`${API_URL}/auth/me/`, {
-        headers: { Authorization: `Bearer ${tokenSauvegarde}` },
-      }).then((res) => {
-        if (res.ok) {
-          return res.json().then((donnees) => {
-            setToken(tokenSauvegarde);
-            setRole(donnees.role);
-            chargerCourriers(tokenSauvegarde);
-          });
-        } else {
-          // Token invalide ou expiré → on nettoie
-          localStorage.removeItem("access_token");
-        }
-      });
+  
+    if (!tokenSauvegarde) {
+      return;
     }
+  
+    async function restaurerSession() {
+      try {
+        const profilResponse = await fetch(`${API_URL}/auth/me/`, {
+          headers: {
+            Authorization: `Bearer ${tokenSauvegarde}`,
+          },
+        });
+  
+        if (!profilResponse.ok) {
+          localStorage.removeItem("access_token");
+          return;
+        }
+  
+        const profil = await profilResponse.json();
+  
+        setToken(tokenSauvegarde);
+        setRole(profil.role);
+  
+        const courriersResponse = await fetch(`${API_URL}/courriers/`, {
+          headers: {
+            Authorization: `Bearer ${tokenSauvegarde}`,
+          },
+        });
+  
+        if (!courriersResponse.ok) {
+          throw new Error("Impossible de charger les courriers.");
+        }
+  
+        setCourriers(await courriersResponse.json());
+      } catch (error) {
+        localStorage.removeItem("access_token");
+        setErreur(error.message);
+      }
+    }
+  
+    restaurerSession();
   }, []);
 
   if (!token) {
