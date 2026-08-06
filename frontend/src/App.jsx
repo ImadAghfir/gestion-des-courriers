@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import illustrationConnexion from "./assets/interff.webp";
 
 const API_URL = "/api";
 
@@ -18,6 +19,8 @@ const libellesStatut = {
 function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [afficherMotDePasse, setAfficherMotDePasse] = useState(false);
+  const [seSouvenir, setSeSouvenir] = useState(true);
   const [token, setToken] = useState("");
   const [role, setRole] = useState("");
   const [courriers, setCourriers] = useState([]);
@@ -49,6 +52,7 @@ const [affectation, setAffectation] = useState({
     if (response.status === 401) {
       // Token expiré ou invalide → déconnexion automatique
       localStorage.removeItem("access_token");
+      sessionStorage.removeItem("access_token");
       setToken("");
       setRole("");
       setCourriers([]);
@@ -146,7 +150,8 @@ async function marquerNotificationLue(notificationId) {
         throw new Error("Nom d'utilisateur ou mot de passe incorrect.");
       }
 
-      localStorage.setItem("access_token", donnees.access);
+      const stockage = seSouvenir ? localStorage : sessionStorage;
+      stockage.setItem("access_token", donnees.access);
       setToken(donnees.access);
       await chargerProfil(donnees.access);
       setPassword("");
@@ -286,6 +291,7 @@ async function envoyerAffectation(event) {
 
   function seDeconnecter() {
     localStorage.removeItem("access_token");
+    sessionStorage.removeItem("access_token");
     setToken("");
     setRole("");
     setCourriers([]);
@@ -296,7 +302,8 @@ setAfficherNotifications(false);
   }
 
   useEffect(() => {
-    const tokenSauvegarde = localStorage.getItem("access_token");
+    const tokenSauvegarde =
+      localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
   
     if (!tokenSauvegarde) {
       return;
@@ -312,6 +319,7 @@ setAfficherNotifications(false);
   
         if (!profilResponse.ok) {
           localStorage.removeItem("access_token");
+          sessionStorage.removeItem("access_token");
           return;
         }
   
@@ -345,6 +353,7 @@ setAfficherNotifications(false);
         setNotifications(await notificationsResponse.json());
       } catch (error) {
         localStorage.removeItem("access_token");
+        sessionStorage.removeItem("access_token");
         setErreur(error.message);
       }
     }
@@ -354,35 +363,101 @@ setAfficherNotifications(false);
 
   if (!token) {
     return (
-      <main className="conteneur connexion">
-        <section className="carte">
-          <h1>Gestion des courriers</h1>
-          <p>Connectez-vous pour accéder à l’application.</p>
+      <main className="page-connexion">
+        <section className="connexion-carte">
+          <div className="connexion-formulaire">
+            <div className="marque">
+              <span className="marque-icone" aria-hidden="true">✉</span>
+              <span>Gestion des Courriers</span>
+            </div>
 
-          <form onSubmit={seConnecter}>
-            <label htmlFor="username">Nom d’utilisateur</label>
-            <input
-              id="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
+            <div className="connexion-introduction">
+              <p className="sur-titre">ESPACE SÉCURISÉ</p>
+              <h1>Bienvenue</h1>
+              <p>Connectez-vous pour consulter et traiter vos courriers centralisés.</p>
+            </div>
+
+            <form className="formulaire-connexion" onSubmit={seConnecter}>
+              <label htmlFor="username">Adresse e-mail ou identifiant</label>
+              <div className="champ-icone">
+                <span aria-hidden="true">@</span>
+                <input
+                  id="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  placeholder="nom@organisation.ma"
+                  required
+                />
+              </div>
+
+              <label htmlFor="password">Mot de passe</label>
+              <div className="champ-icone">
+                <span aria-hidden="true">⌁</span>
+                <input
+                  id="password"
+                  type={afficherMotDePasse ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Votre mot de passe"
+                  required
+                />
+                <button
+                  className="basculer-mot-de-passe"
+                  type="button"
+                  onClick={() => setAfficherMotDePasse(!afficherMotDePasse)}
+                  aria-label={afficherMotDePasse ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                >
+                  {afficherMotDePasse ? "Masquer" : "Afficher"}
+                </button>
+              </div>
+
+              <div className="options-connexion">
+                <label className="memoriser">
+                  <input
+                    type="checkbox"
+                    checked={seSouvenir}
+                    onChange={(event) => setSeSouvenir(event.target.checked)}
+                  />
+                  <span>Se souvenir de moi</span>
+                </label>
+              </div>
+
+              {erreur && <p className="erreur">{erreur}</p>}
+
+              <button className="bouton-connexion" type="submit" disabled={chargement}>
+                {chargement ? "Connexion en cours..." : "Se connecter"}
+                <span aria-hidden="true">→</span>
+              </button>
+            </form>
+          </div>
+
+          <aside className="connexion-visuel" aria-label="Centralisation des courriers">
+            <img
+              className="image-connexion"
+              src={illustrationConnexion}
+              alt="Illustration de la centralisation numérique des courriers"
             />
+            <div className="voile-illustration" />
+            <div className="visuel-grille" />
+            <div className="visuel-courrier courrier-haut">
+              <span>✉</span>
+              <small>Courriers entrants</small>
 
-            <label htmlFor="password">Mot de passe</label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-
-            {erreur && <p className="erreur">{erreur}</p>}
-
-            <button type="submit" disabled={chargement}>
-              {chargement ? "Connexion..." : "Se connecter"}
-            </button>
-          </form>
+            </div>
+            <div className="visuel-courrier courrier-bas">
+              <span>↗</span>
+              <small>Courriers sortants</small>
+            </div>
+            <div className="visuel-centre">
+              <div className="visuel-logo">GC</div>
+              <h2>Tous vos courriers,<br />un seul espace.</h2>
+              <p>Centralisez, affectez et suivez chaque échange en toute simplicité.</p>
+            </div>
+            <div className="pastille pastille-une" />
+            <div className="pastille pastille-deux" />
+          </aside>
         </section>
       </main>
     );
