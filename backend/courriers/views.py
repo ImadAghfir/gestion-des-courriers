@@ -6,8 +6,6 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
-from historique.models import Historique
-
 from . import services
 from .models import Courrier
 from .serializers import CourrierSerializer
@@ -45,18 +43,17 @@ class CourrierViewSet(viewsets.ModelViewSet):
     # Création
     # ------------------------------------------------------------------
 
-    def perform_create(self, serializer):
-        courrier = serializer.save(createur=self.request.user)
-
-        Historique.objects.create(
-            courrier=courrier,
-            auteur=self.request.user,
-            action=Historique.Action.CREATION,
-            commentaire="Création du courrier.",
+    def create(self, request, *args, **kwargs):
+        """Les courriers sont exclusivement créés par les intégrations externes."""
+        return Response(
+            {
+                "detail": (
+                    "La création manuelle est désactivée. "
+                    "Les courriers sont importés depuis les plateformes externes."
+                )
+            },
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
-
-        # Alerte immédiate si priorité élevée
-        services.notifier_responsable_si_urgent(courrier, declencheur=self.request.user)
 
     # ------------------------------------------------------------------
     # Action générique : changement de statut (via la machine à états)
@@ -162,7 +159,7 @@ class CourrierViewSet(viewsets.ModelViewSet):
         from django.contrib.auth import get_user_model
         from services.models import Service
 
-        if not self._est_responsable_ou_admin(request.user):
+        if not (request.user.is_authenticated and request.user.is_active):
             return Response(
                 {"detail": "Seul un responsable ou administrateur peut affecter un courrier."},
                 status=status.HTTP_403_FORBIDDEN,

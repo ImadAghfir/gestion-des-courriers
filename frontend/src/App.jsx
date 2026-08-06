@@ -2,18 +2,6 @@ import { useEffect, useState } from "react";
 
 const API_URL = "/api";
 
-const formulaireInitial = {
-  typeCourrier: "entrant",
-  objet: "",
-  expediteur: "",
-  destinataire: "",
-  categorie: "Administratif",
-  priorite: "normal",
-  description: "",
-  dateReception: "",
-  dateEcheance: "",
-};
-
 const libellesStatut = {
   recu: "Reçu",
   affecte: "Affecté",
@@ -33,8 +21,6 @@ function App() {
   const [token, setToken] = useState("");
   const [role, setRole] = useState("");
   const [courriers, setCourriers] = useState([]);
-  const [formulaire, setFormulaire] = useState(formulaireInitial);
-  const [afficherFormulaire, setAfficherFormulaire] = useState(false);
   const [erreur, setErreur] = useState("");
   const [message, setMessage] = useState("");
   const [chargement, setChargement] = useState(false);
@@ -170,62 +156,6 @@ await chargerNotifications(donnees.access);
       setErreur(error.message);
       setChargement(false);
     }
-  }
-
-  async function creerCourrier(event) {
-    event.preventDefault();
-    setErreur("");
-    setMessage("");
-    setChargement(true);
-
-    const donnees = {
-      type_courrier: formulaire.typeCourrier,
-      objet: formulaire.objet,
-      expediteur: formulaire.expediteur,
-      destinataire: formulaire.destinataire,
-      categorie: formulaire.categorie,
-      priorite: formulaire.priorite,
-      description: formulaire.description,
-    };
-
-    if (formulaire.dateReception) {
-      donnees.date_reception = formulaire.dateReception;
-    }
-
-    if (formulaire.dateEcheance) {
-      donnees.date_echeance = formulaire.dateEcheance;
-    }
-
-    try {
-      const response = await apiFetch(`${API_URL}/courriers/`, {
-        method: "POST",
-        body: JSON.stringify(donnees),
-      });
-
-      const resultat = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          resultat.detail || "Impossible de créer le courrier."
-        );
-      }
-
-      setMessage(`Courrier ${resultat.numero} créé avec succès.`);
-      setFormulaire(formulaireInitial);
-      setAfficherFormulaire(false);
-      await chargerCourriers(token);
-    } catch (error) {
-      setErreur(error.message);
-    } finally {
-      setChargement(false);
-    }
-  }
-
-  function modifierFormulaire(event) {
-    setFormulaire({
-      ...formulaire,
-      [event.target.name]: event.target.value,
-    });
   }
 
   async function executerAction(courrierId, action, texteSucces) {
@@ -467,9 +397,6 @@ setAfficherNotifications(false);
         </div>
 
         <div className="actions">
-          <button onClick={() => setAfficherFormulaire(!afficherFormulaire)}>
-            {afficherFormulaire ? "Fermer le formulaire" : "Nouveau courrier"}
-          </button>
           <button
             className="bouton-notification"
             onClick={() => setAfficherNotifications(!afficherNotifications)}
@@ -585,126 +512,6 @@ setAfficherNotifications(false);
     </form>
   </section>
 )}
-
-      {afficherFormulaire && (
-        <section className="carte formulaire">
-          <h2>
-  Nouveau courrier{" "}
-  {formulaire.typeCourrier === "entrant" ? "entrant" : "sortant"}
-</h2>
-
-          <form onSubmit={creerCourrier}>
-            <div className="grille">
-            <div>
-  <label htmlFor="typeCourrier">Type de courrier *</label>
-  <select
-    id="typeCourrier"
-    name="typeCourrier"
-    value={formulaire.typeCourrier}
-    onChange={modifierFormulaire}
-  >
-    <option value="entrant">Courrier entrant</option>
-    <option value="sortant">Courrier sortant</option>
-  </select>
-</div>
-              <div>
-                <label htmlFor="objet">Objet *</label>
-                <input
-                  id="objet"
-                  name="objet"
-                  value={formulaire.objet}
-                  onChange={modifierFormulaire}
-                  required
-                />
-              </div>
-
-              {formulaire.typeCourrier === "entrant" ? (
-  <div>
-    <label htmlFor="expediteur">Expéditeur *</label>
-    <input
-      id="expediteur"
-      name="expediteur"
-      value={formulaire.expediteur}
-      onChange={modifierFormulaire}
-      required
-    />
-  </div>
-) : (
-  <div>
-    <label htmlFor="destinataire">Destinataire *</label>
-    <input
-      id="destinataire"
-      name="destinataire"
-      value={formulaire.destinataire}
-      onChange={modifierFormulaire}
-      required
-    />
-  </div>
-)}
-
-              <div>
-                <label htmlFor="categorie">Catégorie *</label>
-                <input
-                  id="categorie"
-                  name="categorie"
-                  value={formulaire.categorie}
-                  onChange={modifierFormulaire}
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="priorite">Priorité *</label>
-                <select
-                  id="priorite"
-                  name="priorite"
-                  value={formulaire.priorite}
-                  onChange={modifierFormulaire}
-                >
-                  <option value="normal">Normal</option>
-                  <option value="urgent">Urgent</option>
-                  <option value="tres_urgent">Très urgent</option>
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="dateReception">Date de réception</label>
-                <input
-                  id="dateReception"
-                  name="dateReception"
-                  type="date"
-                  value={formulaire.dateReception}
-                  onChange={modifierFormulaire}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="dateEcheance">Date d’échéance</label>
-                <input
-                  id="dateEcheance"
-                  name="dateEcheance"
-                  type="date"
-                  value={formulaire.dateEcheance}
-                  onChange={modifierFormulaire}
-                />
-              </div>
-            </div>
-
-            <label htmlFor="description">Description</label>
-            <textarea
-              id="description"
-              name="description"
-              value={formulaire.description}
-              onChange={modifierFormulaire}
-              rows="4"
-            />
-
-            <button type="submit" disabled={chargement}>
-              {chargement ? "Enregistrement..." : "Créer le courrier"}
-            </button>
-          </form>
-        </section>
-      )}
 
       <section className="carte">
         <h2>Courriers</h2>
@@ -846,8 +653,7 @@ setAfficherNotifications(false);
             </button>
           )}
 
-        {(role === "admin" || role === "responsable") &&
-          courrier.type_courrier === "entrant" &&
+        {courrier.type_courrier === "entrant" &&
           !["traite", "archive"].includes(courrier.statut) && (
             <button
               className="petit-bouton"

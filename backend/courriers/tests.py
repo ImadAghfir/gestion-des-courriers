@@ -282,6 +282,33 @@ class VisibiliteAffectationApiTest(APITestCase):
         self.courrier.refresh_from_db()
         self.assertEqual(self.courrier.statut, "en_cours")
 
+    def test_creation_manuelle_refusee(self):
+        self.client.force_authenticate(self.agent)
+
+        response = self.client.post(
+            "/api/courriers/",
+            {
+                "type_courrier": "entrant",
+                "objet": "Création interdite",
+                "categorie": "Administratif",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 405)
+
+    def test_agent_peut_reaffecter_un_courrier_visible(self):
+        self.client.force_authenticate(self.agent)
+
+        response = self.client.post(
+            f"/api/courriers/{self.courrier.id}/affecter/",
+            {"service_id": self.autre_service.id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.courrier.affectations.filter(service=self.autre_service).exists())
+
     def test_agent_sans_service_ne_voit_pas_une_affectation_sans_service(self):
         agent_sans_service = Utilisateur.objects.create_user(
             username="agent_sans_service", password="pass"
