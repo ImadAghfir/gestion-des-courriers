@@ -269,6 +269,19 @@ class VisibiliteAffectationApiTest(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
 
+    def test_agent_affecte_peut_faire_avancer_le_courrier(self):
+        self.client.force_authenticate(self.agent)
+
+        response = self.client.post(
+            f"/api/courriers/{self.courrier.id}/changer-statut/",
+            {"statut": "en_cours"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.courrier.refresh_from_db()
+        self.assertEqual(self.courrier.statut, "en_cours")
+
     def test_agent_sans_service_ne_voit_pas_une_affectation_sans_service(self):
         agent_sans_service = Utilisateur.objects.create_user(
             username="agent_sans_service", password="pass"

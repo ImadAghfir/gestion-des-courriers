@@ -14,6 +14,19 @@ const formulaireInitial = {
   dateEcheance: "",
 };
 
+const libellesStatut = {
+  recu: "Reçu",
+  affecte: "Affecté",
+  en_cours: "En cours",
+  en_attente: "En attente",
+  traite: "Traité",
+  archive: "Archivé",
+  brouillon: "Brouillon",
+  en_validation: "En validation",
+  valide: "Validé",
+  envoye: "Envoyé",
+};
+
 function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -231,6 +244,31 @@ await chargerNotifications(donnees.access);
         throw new Error(resultat.detail || "Action impossible.");
       }
   
+      setMessage(texteSucces);
+      await chargerCourriers(token);
+    } catch (error) {
+      setErreur(error.message);
+    }
+  }
+
+  async function changerStatut(courrier, statut, texteSucces) {
+    setErreur("");
+    setMessage("");
+
+    try {
+      const response = await apiFetch(
+        `${API_URL}/courriers/${courrier.id}/changer-statut/`,
+        {
+          method: "POST",
+          body: JSON.stringify({ statut }),
+        }
+      );
+      const resultat = await response.json();
+
+      if (!response.ok) {
+        throw new Error(resultat.detail || "Changement de statut impossible.");
+      }
+
       setMessage(texteSucces);
       await chargerCourriers(token);
     } catch (error) {
@@ -694,7 +732,7 @@ setAfficherNotifications(false);
       <td>{courrier.type_courrier}</td>
       <td>{courrier.objet}</td>
       <td>{courrier.priorite}</td>
-      <td>{courrier.statut}</td>
+      <td>{libellesStatut[courrier.statut] || courrier.statut}</td>
 
       <td>
         {courrier.type_courrier === "sortant" &&
@@ -710,6 +748,84 @@ setAfficherNotifications(false);
               }
             >
               Soumettre
+            </button>
+            )}
+
+        {courrier.type_courrier === "sortant" &&
+          courrier.statut === "valide" && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                changerStatut(courrier, "envoye", "Courrier envoyé avec succès.")
+              }
+            >
+              Marquer envoyé
+            </button>
+          )}
+
+        {courrier.type_courrier === "sortant" &&
+          courrier.statut === "envoye" && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                changerStatut(courrier, "archive", "Courrier archivé avec succès.")
+              }
+            >
+              Archiver
+            </button>
+          )}
+
+        {courrier.type_courrier === "entrant" &&
+          ["recu", "affecte", "en_attente"].includes(courrier.statut) && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                changerStatut(
+                  courrier,
+                  "en_cours",
+                  "Courrier mis en cours de traitement."
+                )
+              }
+            >
+              {courrier.statut === "en_attente" ? "Reprendre" : "Démarrer"}
+            </button>
+          )}
+
+        {courrier.type_courrier === "entrant" &&
+          courrier.statut === "en_cours" && (
+            <>
+              <button
+                className="petit-bouton"
+                onClick={() =>
+                  changerStatut(
+                    courrier,
+                    "en_attente",
+                    "Courrier mis en attente."
+                  )
+                }
+              >
+                Mettre en attente
+              </button>
+              <button
+                className="petit-bouton"
+                onClick={() =>
+                  changerStatut(courrier, "traite", "Courrier marqué comme traité.")
+                }
+              >
+                Marquer traité
+              </button>
+            </>
+          )}
+
+        {courrier.type_courrier === "entrant" &&
+          courrier.statut === "traite" && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                changerStatut(courrier, "archive", "Courrier archivé avec succès.")
+              }
+            >
+              Archiver
             </button>
           )}
 

@@ -177,7 +177,7 @@ textarea {
   }
 }
 .petit-bouton {
-  margin: 0;
+  margin: 3px;
   padding: 7px 10px;
   font-size: 0.85rem;
 }
