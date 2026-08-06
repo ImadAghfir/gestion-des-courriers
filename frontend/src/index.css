@@ -181,3 +181,33 @@ textarea {
   padding: 7px 10px;
   font-size: 0.85rem;
 }
+.bouton-notification {
+  margin-top: 0;
+  background: #b45309;
+}
+
+.panneau-notifications {
+  margin-bottom: 24px;
+}
+
+.notification {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.notification p {
+  margin: 6px 0;
+}
+
+.notification.non-lue {
+  color: #0c4a6e;
+  font-weight: bold;
+}
+
+.notification.lue {
+  opacity: 0.65;
+}

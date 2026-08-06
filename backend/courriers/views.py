@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -27,7 +28,13 @@ class CourrierViewSet(viewsets.ModelViewSet):
         if role in ("admin", "responsable"):
             return courriers
 
-        return courriers.filter(createur=utilisateur)
+        # Un agent doit pouvoir suivre les courriers qu'il a créés ainsi que
+        # ceux qui lui ont été affectés (directement ou à son service).
+        conditions = Q(createur=utilisateur) | Q(affectations__utilisateur=utilisateur)
+        if utilisateur.service_id:
+            conditions |= Q(affectations__service_id=utilisateur.service_id)
+
+        return courriers.filter(conditions).distinct()
 
     def _est_responsable_ou_admin(self, utilisateur):
         if utilisateur.is_superuser:
@@ -173,13 +180,16 @@ class CourrierViewSet(viewsets.ModelViewSet):
 
         if utilisateur_id:
             try:
-                utilisateur_cible = User.objects.get(pk=utilisateur_id)
+                utilisateur_cible = User.objects.get(pk=utilisateur_id, is_active=True)
             except User.DoesNotExist:
                 return Response({"detail": "Utilisateur introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
         if service_id:
             try:
-                service_cible = Service.objects.get(pk=service_id)
+                service_cible = Service.objects.get(
+                    pk=service_id,
+                    statut=Service.Statut.ACTIF,
+                )
             except Service.DoesNotExist:
                 return Response({"detail": "Service introuvable."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -254,4 +264,4 @@ class CourrierViewSet(viewsets.ModelViewSet):
         Permet au frontend d'afficher uniquement les actions disponibles.
         """
         courrier = self.get_object()
-        return Response({"statuts": services.get_statuts_suivants(courrier)})
+        return Response({"statuts": services.get_statuts_suivants(courrier)})

@@ -3,6 +3,7 @@ Tests unitaires pour les règles métier de courriers/services.py.
 """
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from rest_framework.test import APITestCase
 
 from courriers.models import Courrier
 from courriers import services
@@ -224,3 +225,68 @@ class NumeroImmuableTest(TestCase):
         courrier.numero = "HACK-0001"
         with self.assertRaises(ValidationError):
             courrier.full_clean()
+
+
+class VisibiliteAffectationApiTest(APITestCase):
+    def setUp(self):
+        self.service = Service.objects.create(nom="Comptabilité", code="COMPTA")
+        self.autre_service = Service.objects.create(nom="Juridique", code="JUR")
+        self.responsable = Utilisateur.objects.create_user(
+            username="responsable", password="pass", role="responsable", service=self.service
+        )
+        self.agent = Utilisateur.objects.create_user(
+            username="agent_affecte", password="pass", service=self.service
+        )
+        self.autre_agent = Utilisateur.objects.create_user(
+            username="agent_autre", password="pass", service=self.autre_service
+        )
+        self.courrier = Courrier.objects.create(
+            type_courrier="entrant",
+            objet="Dossier à traiter",
+            categorie="Administratif",
+            createur=self.responsable,
+            service=self.service,
+        )
+        services.affecter_courrier(
+            self.courrier,
+            self.responsable,
+            utilisateur_cible=self.agent,
+        )
+
+    def test_agent_voit_le_courrier_qui_lui_est_affecte(self):
+        self.client.force_authenticate(self.agent)
+
+        response = self.client.get("/api/courriers/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [self.courrier.id])
+
+    def test_agent_ne_voit_pas_le_courrier_sans_lien_avec_lui(self):
+        self.client.force_authenticate(self.autre_agent)
+
+        response = self.client.get("/api/courriers/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_agent_sans_service_ne_voit_pas_une_affectation_sans_service(self):
+        agent_sans_service = Utilisateur.objects.create_user(
+            username="agent_sans_service", password="pass"
+        )
+        courrier_sans_service = Courrier.objects.create(
+            type_courrier="entrant",
+            objet="Dossier privé",
+            categorie="Administratif",
+            createur=self.responsable,
+        )
+        services.affecter_courrier(
+            courrier_sans_service,
+            self.responsable,
+            utilisateur_cible=self.autre_agent,
+        )
+        self.client.force_authenticate(agent_sans_service)
+
+        response = self.client.get("/api/courriers/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])

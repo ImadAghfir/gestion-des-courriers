@@ -25,6 +25,16 @@ function App() {
   const [erreur, setErreur] = useState("");
   const [message, setMessage] = useState("");
   const [chargement, setChargement] = useState(false);
+const [notifications, setNotifications] = useState([]);
+const [afficherNotifications, setAfficherNotifications] = useState(false);
+const [courrierAAffecter, setCourrierAAffecter] = useState(null);
+const [services, setServices] = useState([]);
+const [utilisateurs, setUtilisateurs] = useState([]);
+const [affectation, setAffectation] = useState({
+  serviceId: "",
+  utilisateurId: "",
+  commentaire: "",
+});
 
   // Helper centralisé : attache le token, gère l'expiration (401)
   async function apiFetch(url, options = {}, accessToken) {
@@ -67,6 +77,48 @@ function App() {
       setChargement(false);
     }
   }
+async function chargerNotifications(accessToken) {
+  try {
+    const response = await apiFetch(
+      `${API_URL}/notifications/`,
+      {},
+      accessToken
+    );
+
+    if (!response.ok) {
+      throw new Error("Impossible de charger les notifications.");
+    }
+
+    setNotifications(await response.json());
+  } catch (error) {
+    setErreur(error.message);
+  }
+}
+
+async function marquerNotificationLue(notificationId) {
+  try {
+    const response = await apiFetch(
+      `${API_URL}/notifications/${notificationId}/marquer_lue/`,
+      { method: "POST" }
+    );
+
+    if (!response.ok) {
+      throw new Error("Impossible de marquer la notification comme lue.");
+    }
+
+    const notificationMiseAJour = await response.json();
+
+    setNotifications((liste) =>
+      liste.map((notification) =>
+        notification.id === notificationMiseAJour.id
+          ? notificationMiseAJour
+          : notification
+      )
+    );
+  } catch (error) {
+    setErreur(error.message);
+  }
+}
 
   async function chargerProfil(accessToken) {
     const response = await apiFetch(`${API_URL}/auth/me/`, {}, accessToken);
@@ -100,6 +152,7 @@ function App() {
       await chargerProfil(donnees.access);
       setPassword("");
       await chargerCourriers(donnees.access);
+await chargerNotifications(donnees.access);
     } catch (error) {
       setErreur(error.message);
       setChargement(false);
@@ -184,6 +237,84 @@ function App() {
       setErreur(error.message);
     }
   }
+async function ouvrirAffectation(courrier) {
+  setErreur("");
+  setCourrierAAffecter(courrier);
+  setAffectation({
+    serviceId: "",
+    utilisateurId: "",
+    commentaire: "",
+  });
+
+  try {
+    const [servicesResponse, utilisateursResponse] = await Promise.all([
+      apiFetch(`${API_URL}/services/`),
+      apiFetch(`${API_URL}/utilisateurs/`),
+    ]);
+
+    if (!servicesResponse.ok || !utilisateursResponse.ok) {
+      throw new Error("Impossible de charger les services ou utilisateurs.");
+    }
+
+    setServices(await servicesResponse.json());
+    setUtilisateurs(await utilisateursResponse.json());
+  } catch (error) {
+    setErreur(error.message);
+  }
+}
+
+function modifierAffectation(event) {
+  setAffectation({
+    ...affectation,
+    [event.target.name]: event.target.value,
+  });
+}
+
+async function envoyerAffectation(event) {
+  event.preventDefault();
+
+  if (!affectation.serviceId && !affectation.utilisateurId) {
+    setErreur("Sélectionnez au moins un service ou un utilisateur.");
+    return;
+  }
+
+  setErreur("");
+  setMessage("");
+
+  const donnees = {
+    commentaire: affectation.commentaire,
+  };
+
+  if (affectation.serviceId) {
+    donnees.service_id = Number(affectation.serviceId);
+  }
+
+  if (affectation.utilisateurId) {
+    donnees.utilisateur_id = Number(affectation.utilisateurId);
+  }
+
+  try {
+    const response = await apiFetch(
+      `${API_URL}/courriers/${courrierAAffecter.id}/affecter/`,
+      {
+        method: "POST",
+        body: JSON.stringify(donnees),
+      }
+    );
+
+    const resultat = await response.json();
+
+    if (!response.ok) {
+      throw new Error(resultat.detail || "Affectation impossible.");
+    }
+
+    setMessage("Courrier affecté avec succès.");
+    setCourrierAAffecter(null);
+    await chargerCourriers(token);
+  } catch (error) {
+    setErreur(error.message);
+  }
+}
 
   function seDeconnecter() {
     localStorage.removeItem("access_token");
@@ -192,6 +323,8 @@ function App() {
     setCourriers([]);
     setUsername("");
     setMessage("");
+setNotifications([]);
+setAfficherNotifications(false);
   }
 
   useEffect(() => {
@@ -230,6 +363,18 @@ function App() {
         }
   
         setCourriers(await courriersResponse.json());
+
+        const notificationsResponse = await fetch(`${API_URL}/notifications/`, {
+          headers: {
+            Authorization: `Bearer ${tokenSauvegarde}`,
+          },
+        });
+
+        if (!notificationsResponse.ok) {
+          throw new Error("Impossible de charger les notifications.");
+        }
+
+        setNotifications(await notificationsResponse.json());
       } catch (error) {
         localStorage.removeItem("access_token");
         setErreur(error.message);
@@ -287,6 +432,12 @@ function App() {
           <button onClick={() => setAfficherFormulaire(!afficherFormulaire)}>
             {afficherFormulaire ? "Fermer le formulaire" : "Nouveau courrier"}
           </button>
+          <button
+            className="bouton-notification"
+            onClick={() => setAfficherNotifications(!afficherNotifications)}
+          >
+            Notifications ({notifications.filter((notification) => !notification.lu).length})
+          </button>
 
           <button className="bouton-secondaire" onClick={seDeconnecter}>
             Se déconnecter
@@ -296,6 +447,106 @@ function App() {
 
       {erreur && <p className="erreur">{erreur}</p>}
       {message && <p className="message">{message}</p>}
+{afficherNotifications && (
+  <section className="carte panneau-notifications">
+    <h2>Mes notifications</h2>
+
+    {notifications.length === 0 ? (
+      <p>Aucune notification.</p>
+    ) : (
+      notifications.map((notification) => (
+        <article
+          key={notification.id}
+          className={`notification ${notification.lu ? "lue" : "non-lue"}`}
+        >
+          <div>
+            <strong>{notification.type.toUpperCase()}</strong>
+            <p>{notification.message}</p>
+
+            {notification.courrier_numero && (
+              <small>Courrier : {notification.courrier_numero}</small>
+            )}
+          </div>
+
+          {!notification.lu && (
+            <button
+              className="petit-bouton"
+              onClick={() => marquerNotificationLue(notification.id)}
+            >
+              Marquer comme lue
+            </button>
+          )}
+        </article>
+      ))
+    )}
+  </section>
+)}
+{courrierAAffecter && (
+  <section className="carte formulaire">
+    <h2>Affecter {courrierAAffecter.numero}</h2>
+
+    <form onSubmit={envoyerAffectation}>
+      <div className="grille">
+        <div>
+          <label htmlFor="serviceId">Service</label>
+          <select
+            id="serviceId"
+            name="serviceId"
+            value={affectation.serviceId}
+            onChange={modifierAffectation}
+          >
+            <option value="">-- Choisir un service --</option>
+            {services.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.code} - {service.nom}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label htmlFor="utilisateurId">Utilisateur</label>
+          <select
+            id="utilisateurId"
+            name="utilisateurId"
+            value={affectation.utilisateurId}
+            onChange={modifierAffectation}
+          >
+            <option value="">-- Choisir un utilisateur --</option>
+            {utilisateurs.map((utilisateur) => (
+              <option key={utilisateur.id} value={utilisateur.id}>
+                {utilisateur.username} ({utilisateur.role})
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <label htmlFor="commentaire">Commentaire</label>
+      <textarea
+        id="commentaire"
+        name="commentaire"
+        value={affectation.commentaire}
+        onChange={modifierAffectation}
+        rows="3"
+      />
+
+<div className="actions">
+  <button type="submit" disabled={chargement}>
+    {chargement ? "Affectation..." : "Confirmer l’affectation"}
+  </button>
+
+  <button
+    type="button"
+    className="bouton-secondaire"
+    onClick={() => setCourrierAAffecter(null)}
+  >
+    Annuler
+  </button>
+</div>
+    </form>
+  </section>
+)}
 
       {afficherFormulaire && (
         <section className="carte formulaire">
@@ -437,50 +688,62 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {courriers.map((courrier) => (
-                <tr key={courrier.id}>
-                  <td>{courrier.numero}</td>
-                  <td>{courrier.type_courrier}</td>
-                  <td>{courrier.objet}</td>
-                  <td>{courrier.priorite}</td>
-                  <td>{courrier.statut}</td>
-                  <td>
-  {courrier.type_courrier === "sortant" &&
-    courrier.statut === "brouillon" && (
-      <button
-        className="petit-bouton"
-        onClick={() =>
-          executerAction(
-            courrier.id,
-            "soumettre_validation",
-            "Courrier soumis pour validation."
-          )
-        }
-      >
-        Soumettre
-      </button>
-    )}
+  {courriers.map((courrier) => (
+    <tr key={courrier.id}>
+      <td>{courrier.numero}</td>
+      <td>{courrier.type_courrier}</td>
+      <td>{courrier.objet}</td>
+      <td>{courrier.priorite}</td>
+      <td>{courrier.statut}</td>
 
-  {courrier.type_courrier === "sortant" &&
-    courrier.statut === "en_validation" &&
-    (role === "admin" || role === "responsable") && (
-      <button
-        className="petit-bouton"
-        onClick={() =>
-          executerAction(
-            courrier.id,
-            "valider",
-            "Courrier validé avec succès."
-          )
-        }
-      >
-        Valider
-      </button>
-    )}
-</td>
-                </tr>
-              ))}
-            </tbody>
+      <td>
+        {courrier.type_courrier === "sortant" &&
+          courrier.statut === "brouillon" && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                executerAction(
+                  courrier.id,
+                  "soumettre_validation",
+                  "Courrier soumis pour validation."
+                )
+              }
+            >
+              Soumettre
+            </button>
+          )}
+
+        {courrier.type_courrier === "sortant" &&
+          courrier.statut === "en_validation" &&
+          (role === "admin" || role === "responsable") && (
+            <button
+              className="petit-bouton"
+              onClick={() =>
+                executerAction(
+                  courrier.id,
+                  "valider",
+                  "Courrier validé avec succès."
+                )
+              }
+            >
+              Valider
+            </button>
+          )}
+
+        {(role === "admin" || role === "responsable") &&
+          courrier.type_courrier === "entrant" &&
+          !["traite", "archive"].includes(courrier.statut) && (
+            <button
+              className="petit-bouton"
+              onClick={() => ouvrirAffectation(courrier)}
+            >
+              Affecter
+            </button>
+          )}
+      </td>
+    </tr>
+  ))}
+</tbody>
           </table>
         )}
       </section>
