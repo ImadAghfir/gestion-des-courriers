@@ -1,4 +1,6 @@
-from django.core.exceptions import ValidationError
+from datetime import date
+
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 
 from rest_framework import permissions, status, viewsets
@@ -6,234 +8,364 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
+from services.models import Departement, Service
+
 from . import services
 from .models import Courrier
 from .serializers import CourrierSerializer
 
 
+def _reponse_erreur(exc):
+    """Convertit une exception métier en réponse HTTP appropriée."""
+    if isinstance(exc, PermissionDenied):
+        return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+    message = getattr(exc, "message", None) or "; ".join(
+        m for messages in getattr(exc, "message_dict", {}).values() for m in messages
+    ) or str(exc)
+    return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class CourrierViewSet(viewsets.ModelViewSet):
+    """
+    API des courriers — chaque acteur voit uniquement son périmètre
+    (cahier des charges §5.3.4) :
+
+    - Admin / DG : tous les courriers ;
+    - Bureau d'Ordre : les courriers qu'il a enregistrés ;
+    - Chef de Département : les courriers affectés à son département
+      (après affectation finale) ;
+    - Chef de Service : les courriers affectés à son service.
+    """
+
     serializer_class = CourrierSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
         utilisateur = self.request.user
-        courriers = Courrier.objects.select_related("service", "createur").all()
+        courriers = Courrier.objects.select_related(
+            "departement", "service", "affectation_provisoire", "createur"
+        ).prefetch_related("historiques__auteur")
 
-        if utilisateur.is_superuser:
-            return courriers
+        role = services._role(utilisateur)
 
-        role = getattr(utilisateur, "role", "agent")
-        if role in ("admin", "responsable"):
-            return courriers
+        if role in ("admin", "dg", "secretaire"):
+            perimetre = courriers
+        elif role == "bureau_ordre":
+            perimetre = courriers.filter(createur=utilisateur)
+        elif role == "chef_departement":
+            perimetre = courriers.filter(
+                departement_id=utilisateur.departement_id,
+                departement_id__isnull=False,
+                statut__in=["affecte", "en_traitement", "traite", "archive"],
+            )
+        elif role == "chef_service":
+            perimetre = courriers.filter(
+                service_id=utilisateur.service_id,
+                service_id__isnull=False,
+                statut__in=["affecte", "en_traitement", "traite", "archive"],
+            )
+        else:
+            perimetre = courriers.none()
 
-        # Un agent doit pouvoir suivre les courriers qu'il a créés ainsi que
-        # ceux qui lui ont été affectés (directement ou à son service).
-        conditions = Q(createur=utilisateur) | Q(affectations__utilisateur=utilisateur)
-        if utilisateur.service_id:
-            conditions |= Q(affectations__service_id=utilisateur.service_id)
+        return self._appliquer_filtres(perimetre)
 
-        return courriers.filter(conditions).distinct()
+    def _appliquer_filtres(self, queryset):
+        """
+        Recherche avancée (cahier des charges §5.7).
 
-    def _est_responsable_ou_admin(self, utilisateur):
-        if utilisateur.is_superuser:
-            return True
-        return getattr(utilisateur, "role", "agent") in ("admin", "responsable")
+        Paramètres de requête acceptés :
+        - q : texte libre (n° interne, n° source, objet, expéditeur,
+          destinataire, description) ;
+        - statut, priorite, type_courrier, categorie : valeur exacte ;
+        - departement, service : identifiant ;
+        - reception_du / reception_au : période de réception ;
+        - source_du / source_au : période de la date source ;
+        - avec_instructions : "oui" ou "non".
+        """
+        params = self.request.query_params
+
+        q = params.get("q", "").strip()
+        if q:
+            queryset = queryset.filter(
+                Q(numero__icontains=q)
+                | Q(numero_source__icontains=q)
+                | Q(objet__icontains=q)
+                | Q(expediteur__icontains=q)
+                | Q(destinataire__icontains=q)
+                | Q(description__icontains=q)
+            )
+
+        for champ in ("statut", "priorite", "type_courrier", "categorie"):
+            valeur = params.get(champ, "").strip()
+            if valeur:
+                queryset = queryset.filter(**{champ: valeur})
+
+        for param, champ in (
+            ("departement", "departement_id"),
+            ("service", "service_id"),
+        ):
+            valeur = params.get(param, "").strip()
+            if valeur.isdigit():
+                queryset = queryset.filter(**{champ: int(valeur)})
+
+        for param, champ in (
+            ("reception_du", "date_reception__gte"),
+            ("reception_au", "date_reception__lte"),
+            ("source_du", "date_source__gte"),
+            ("source_au", "date_source__lte"),
+        ):
+            valeur = params.get(param, "").strip()
+            if valeur:
+                try:
+                    valeur = date.fromisoformat(valeur)
+                except ValueError:
+                    continue  # date invalide : filtre ignoré
+                queryset = queryset.filter(**{champ: valeur})
+
+        avec_instructions = params.get("avec_instructions", "").strip().lower()
+        if avec_instructions == "oui":
+            queryset = queryset.filter(
+                ~Q(instructions_dg="") | ~Q(instructions_chef_dept="")
+            )
+        elif avec_instructions == "non":
+            queryset = queryset.filter(
+                instructions_dg="", instructions_chef_dept=""
+            )
+
+        return queryset
 
     # ------------------------------------------------------------------
-    # Création
+    # Enregistrement (Bureau d'Ordre) — §5.3.2 / §5.3.3
     # ------------------------------------------------------------------
 
     def create(self, request, *args, **kwargs):
-        """Les courriers sont exclusivement créés par les intégrations externes."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            courrier = services.enregistrer_courrier(
+                request.user, serializer.validated_data
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+
         return Response(
-            {
-                "detail": (
-                    "La création manuelle est désactivée. "
-                    "Les courriers sont importés depuis les plateformes externes."
-                )
-            },
+            self.get_serializer(courrier).data, status=status.HTTP_201_CREATED
+        )
+
+    # ------------------------------------------------------------------
+    # Modification contrôlée — §5.3.7
+    # ------------------------------------------------------------------
+
+    def partial_update(self, request, *args, **kwargs):
+        courrier = self.get_object()
+        serializer = self.get_serializer(
+            courrier, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+
+        commentaire = request.data.get("commentaire_modification", "")
+
+        try:
+            services.modifier_courrier(
+                courrier, request.user, serializer.validated_data, commentaire
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+
+        return Response(self.get_serializer(courrier).data)
+
+    def update(self, request, *args, **kwargs):
+        return Response(
+            {"detail": "Utilisez PATCH pour une modification contrôlée."},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
 
     # ------------------------------------------------------------------
-    # Action générique : changement de statut (via la machine à états)
+    # Workflow v3.3
     # ------------------------------------------------------------------
 
-    @action(detail=True, methods=["post"], url_path="changer-statut")
-    def changer_statut(self, request, pk=None):
-        """
-        Change le statut d'un courrier en respectant la machine à états.
-
-        Corps JSON attendu :
-            { "statut": "en_cours", "commentaire": "..." }
-        """
+    def _action_simple(self, request, fonction, **kwargs):
         courrier = self.get_object()
-        nouveau_statut = request.data.get("statut")
-        commentaire = request.data.get("commentaire", "")
-
-        if not nouveau_statut:
-            return Response(
-                {"detail": "Le champ 'statut' est obligatoire."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            services.changer_statut(courrier, nouveau_statut, request.user, commentaire)
-        except ValidationError as exc:
-            return Response(
-                {"detail": exc.message},
-                status=status.HTTP_400_BAD_REQUEST,
+            fonction(
+                courrier,
+                request.user,
+                commentaire=request.data.get("commentaire", ""),
+                **kwargs,
             )
-
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
         return Response(self.get_serializer(courrier).data)
-
-    # ------------------------------------------------------------------
-    # Action : soumettre un courrier sortant à la validation
-    # ------------------------------------------------------------------
 
     @action(detail=True, methods=["post"])
-    def soumettre_validation(self, request, pk=None):
-        """BROUILLON → EN_VALIDATION (courrier sortant uniquement)."""
-        courrier = self.get_object()
-
-        if courrier.type_courrier != Courrier.TypeCourrier.SORTANT:
-            return Response(
-                {"detail": "Seuls les courriers sortants peuvent être soumis à validation."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            services.changer_statut(
-                courrier, "en_validation", request.user,
-                "Courrier soumis pour validation."
-            )
-        except ValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(self.get_serializer(courrier).data)
-
-    # ------------------------------------------------------------------
-    # Action : valider un courrier sortant
-    # ------------------------------------------------------------------
+    def transmettre(self, request, pk=None):
+        """Bureau d'Ordre → transmet le courrier au DG."""
+        return self._action_simple(request, services.transmettre_au_dg)
 
     @action(detail=True, methods=["post"])
     def valider(self, request, pk=None):
-        """EN_VALIDATION → VALIDE. Réservé aux responsables et admins."""
-        courrier = self.get_object()
-
-        if not self._est_responsable_ou_admin(request.user):
-            return Response(
-                {"detail": "Seul un responsable ou administrateur peut valider un courrier."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if courrier.type_courrier != Courrier.TypeCourrier.SORTANT:
-            return Response(
-                {"detail": "Seuls les courriers sortants peuvent être validés."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            services.valider_courrier(courrier, request.user)
-        except ValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(self.get_serializer(courrier).data)
-
-    # ------------------------------------------------------------------
-    # Action : affecter un courrier
-    # ------------------------------------------------------------------
+        """DG → valide le courrier."""
+        return self._action_simple(request, services.valider_courrier)
 
     @action(detail=True, methods=["post"])
-    def affecter(self, request, pk=None):
-        """
-        Affecte le courrier à un utilisateur et/ou un service.
-
-        Corps JSON attendu :
-            {
-                "utilisateur_id": 3,       # optionnel
-                "service_id": 1,           # optionnel (au moins un des deux)
-                "commentaire": "..."       # optionnel
-            }
-        """
-        from django.contrib.auth import get_user_model
-        from services.models import Service
-
-        if not (request.user.is_authenticated and request.user.is_active):
-            return Response(
-                {"detail": "Seul un responsable ou administrateur peut affecter un courrier."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+    def rejeter(self, request, pk=None):
+        """DG → rejette le courrier (commentaire obligatoire)."""
         courrier = self.get_object()
-        User = get_user_model()
+        try:
+            services.rejeter_courrier(
+                courrier, request.user, request.data.get("commentaire", "")
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+        return Response(self.get_serializer(courrier).data)
 
-        utilisateur_id = request.data.get("utilisateur_id")
-        service_id = request.data.get("service_id")
-        commentaire = request.data.get("commentaire", "")
+    @action(detail=True, methods=["post"], url_path="affectation-finale")
+    def affectation_finale(self, request, pk=None):
+        """
+        DG → affectation finale officielle (ou réaffectation après retour).
 
-        utilisateur_cible = None
-        service_cible = None
+        Corps JSON : { "departement_id": 1, "instructions": "...", "commentaire": "..." }
+        """
+        courrier = self.get_object()
 
-        if utilisateur_id:
+        departement = None
+        departement_id = request.data.get("departement_id")
+        if departement_id:
             try:
-                utilisateur_cible = User.objects.get(pk=utilisateur_id, is_active=True)
-            except User.DoesNotExist:
-                return Response({"detail": "Utilisateur introuvable."}, status=status.HTTP_404_NOT_FOUND)
-
-        if service_id:
-            try:
-                service_cible = Service.objects.get(
-                    pk=service_id,
-                    statut=Service.Statut.ACTIF,
+                departement = Departement.objects.get(
+                    pk=departement_id, statut=Departement.Statut.ACTIF
                 )
-            except Service.DoesNotExist:
-                return Response({"detail": "Service introuvable."}, status=status.HTTP_404_NOT_FOUND)
+            except Departement.DoesNotExist:
+                return Response(
+                    {"detail": "Département introuvable ou inactif."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         try:
-            services.affecter_courrier(
-                courrier, request.user,
-                utilisateur_cible=utilisateur_cible,
-                service_cible=service_cible,
-                commentaire=commentaire,
+            services.affectation_finale(
+                courrier,
+                request.user,
+                departement,
+                instructions=request.data.get("instructions", ""),
+                commentaire=request.data.get("commentaire", ""),
             )
-        except ValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
 
         return Response(self.get_serializer(courrier).data)
 
+    @action(detail=True, methods=["post"], url_path="instructions-dg")
+    def instructions_dg(self, request, pk=None):
+        """DG → ajoute ou met à jour ses instructions."""
+        courrier = self.get_object()
+        try:
+            services.donner_instructions_dg(
+                courrier, request.user, request.data.get("instructions", "")
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+        return Response(self.get_serializer(courrier).data)
+
+    @action(detail=True, methods=["post"], url_path="retourner-dg")
+    def retourner_dg(self, request, pk=None):
+        """Chef de Département → retourne le courrier au DG (commentaire obligatoire)."""
+        courrier = self.get_object()
+        try:
+            services.retourner_au_dg(
+                courrier, request.user, request.data.get("commentaire", "")
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+        return Response(self.get_serializer(courrier).data)
+
+    @action(detail=True, methods=["post"], url_path="affecter-service")
+    def affecter_service(self, request, pk=None):
+        """
+        Chef de Département → affecte le courrier à un service de son département.
+
+        Corps JSON : { "service_id": 1, "instructions": "...", "commentaire": "..." }
+        """
+        courrier = self.get_object()
+
+        service = None
+        service_id = request.data.get("service_id")
+        if service_id:
+            try:
+                service = Service.objects.get(
+                    pk=service_id, statut=Service.Statut.ACTIF
+                )
+            except Service.DoesNotExist:
+                return Response(
+                    {"detail": "Service introuvable ou inactif."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        try:
+            services.affecter_au_service(
+                courrier,
+                request.user,
+                service,
+                instructions=request.data.get("instructions", ""),
+                commentaire=request.data.get("commentaire", ""),
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+
+        return Response(self.get_serializer(courrier).data)
+
+    @action(detail=True, methods=["post"], url_path="instructions-dept")
+    def instructions_dept(self, request, pk=None):
+        """Chef de Département → ajoute ou met à jour ses instructions."""
+        courrier = self.get_object()
+        try:
+            services.donner_instructions_chef_dept(
+                courrier, request.user, request.data.get("instructions", "")
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
+        return Response(self.get_serializer(courrier).data)
+
+    @action(detail=True, methods=["post"])
+    def traiter(self, request, pk=None):
+        """Chef de Service → démarre le traitement."""
+        return self._action_simple(request, services.traiter_courrier)
+
+    @action(detail=True, methods=["post"])
+    def cloturer(self, request, pk=None):
+        """Chef de Service → clôture le traitement (statut TRAITÉ)."""
+        return self._action_simple(request, services.cloturer_courrier)
+
+    @action(detail=True, methods=["post"])
+    def archiver(self, request, pk=None):
+        """Bureau d'Ordre → archive définitivement le courrier."""
+        return self._action_simple(request, services.archiver_courrier)
+
+    @action(detail=True, methods=["post"])
+    def envoyer(self, request, pk=None):
+        """Bureau d'Ordre → marque un courrier sortant comme envoyé."""
+        return self._action_simple(request, services.envoyer_courrier)
+
     # ------------------------------------------------------------------
-    # Action : ajouter un commentaire
+    # Commentaires et documents
     # ------------------------------------------------------------------
 
     @action(detail=True, methods=["post"])
     def commenter(self, request, pk=None):
-        """
-        Ajoute un commentaire tracé dans Historique.
-
-        Corps JSON attendu : { "commentaire": "..." }
-        """
+        """Ajoute un commentaire tracé dans l'historique."""
         courrier = self.get_object()
-        commentaire = request.data.get("commentaire", "")
-
         try:
-            services.ajouter_commentaire(courrier, request.user, commentaire)
-        except ValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
-
+            services.ajouter_commentaire(
+                courrier, request.user, request.data.get("commentaire", "")
+            )
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
         return Response({"detail": "Commentaire ajouté."})
-
-    # ------------------------------------------------------------------
-    # Action : attacher un document
-    # ------------------------------------------------------------------
 
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser])
     def ajouter_document(self, request, pk=None):
-        """
-        Attache un fichier au courrier et trace l'ajout dans Historique.
-
-        Envoi multipart/form-data avec le champ 'fichier'.
-        """
+        """Attache un fichier au courrier (multipart, champ 'fichier')."""
         courrier = self.get_object()
         fichier = request.FILES.get("fichier")
 
@@ -245,20 +377,17 @@ class CourrierViewSet(viewsets.ModelViewSet):
 
         try:
             services.ajouter_document(courrier, request.user, fichier)
-        except ValidationError as exc:
-            return Response({"detail": exc.message}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, PermissionDenied) as exc:
+            return _reponse_erreur(exc)
 
         return Response(self.get_serializer(courrier).data)
 
     # ------------------------------------------------------------------
-    # Action : statuts atteignables (aide pour le frontend)
+    # Aides pour le frontend
     # ------------------------------------------------------------------
 
     @action(detail=True, methods=["get"], url_path="statuts-suivants")
     def statuts_suivants(self, request, pk=None):
-        """
-        Retourne la liste des statuts autorisés depuis l'état actuel.
-        Permet au frontend d'afficher uniquement les actions disponibles.
-        """
+        """Statuts atteignables depuis l'état actuel."""
         courrier = self.get_object()
         return Response({"statuts": services.get_statuts_suivants(courrier)})

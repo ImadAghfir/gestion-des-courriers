@@ -151,3 +151,12 @@ REST_FRAMEWORK = {
 
 AUTH_USER_MODEL = "utilisateurs.Utilisateur"
 
+
+# Déconnexion automatique après 30 minutes d'inactivité (§10.1) :
+# le jeton d'accès expire au bout de 30 minutes.
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(hours=8),
+}
