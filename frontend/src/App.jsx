@@ -32,20 +32,6 @@ const libellesPriorite = {
   tres_urgent: "Très urgent",
 };
 
-const categoriesEntrant = [
-  ["administratif", "Administratif"],
-  ["juridique", "Juridique"],
-  ["financier", "Financier"],
-  ["autre", "Autre"],
-];
-
-const categoriesSortant = [
-  ["reponse", "Réponse"],
-  ["demande", "Demande"],
-  ["notification", "Notification"],
-  ["autre", "Autre"],
-];
-
 const filtresVides = {
   q: "",
   statut: "",
@@ -115,7 +101,6 @@ function App() {
   const [panneauAction, setPanneauAction] = useState(null);
   const [champsAction, setChampsAction] = useState({});
   const [filtres, setFiltres] = useState(filtresVides);
-  const [afficherFiltres, setAfficherFiltres] = useState(false);
   const [statistiques, setStatistiques] = useState(null);
   const [journal, setJournal] = useState(null);
   const [actionsJournal, setActionsJournal] = useState([]);
@@ -562,17 +547,22 @@ function App() {
   useEffect(() => {
     if (!token) return;
 
-    if (route === "/statistiques") {
-      chargerStatistiques();
-    } else if (route.startsWith("/administration")) {
-      chargerDonneesAdmin();
-      const parties = route.split("/");
-      if (parties[2] && ["utilisateurs", "departements", "services"].includes(parties[2])) {
-        setOngletAdmin(parties[2]);
+    // Defer stateful loading so this effect only initiates async work.
+    void Promise.resolve().then(() => {
+      if (route === "/statistiques") {
+        return chargerStatistiques();
       }
-    } else if (route === "/journal") {
-      chargerJournal();
-    }
+
+      if (route.startsWith("/administration")) {
+        const parties = route.split("/");
+        if (parties[2] && ["utilisateurs", "departements", "services"].includes(parties[2])) {
+          setOngletAdmin(parties[2]);
+        }
+        return chargerDonneesAdmin();
+      }
+
+      if (route === "/journal") return chargerJournal();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route, token]);
 
