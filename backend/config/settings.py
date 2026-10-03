@@ -31,6 +31,9 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG", "False") == "True"
 ALLOWED_HOSTS = []
 
+# Adresse de l'interface React. En développement, Vite la sert sur le port 5173.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173/")
+
 
 # Application definition
 
@@ -150,6 +153,14 @@ REST_FRAMEWORK = {
 }
 
 AUTH_USER_MODEL = "utilisateurs.Utilisateur"
+
+# Analyse locale de documents : aucune donnée n'est envoyée à un service cloud.
+AI_OLLAMA_URL = os.getenv("AI_OLLAMA_URL", "http://127.0.0.1:11434")
+AI_OLLAMA_MODEL = os.getenv("AI_OLLAMA_MODEL", "qwen2.5:3b")
+AI_OLLAMA_TIMEOUT = int(os.getenv("AI_OLLAMA_TIMEOUT", "240"))
+AI_TESSERACT_COMMAND = os.getenv("AI_TESSERACT_COMMAND", "tesseract")
+AI_PDFTOTEXT_COMMAND = os.getenv("AI_PDFTOTEXT_COMMAND", "pdftotext")
+AI_PDFTOPPM_COMMAND = os.getenv("AI_PDFTOPPM_COMMAND", "pdftoppm")
 
 
 # Déconnexion automatique après 30 minutes d'inactivité (§10.1) :

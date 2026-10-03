@@ -138,8 +138,8 @@ class StatistiquesView(APIView):
             ],
             "par_departement": _compter_par(entrants, "departement__nom"),
             "affectation_provisoire": {
-                "avec": entrants.filter(affectation_provisoire__isnull=False).count(),
-                "sans": entrants.filter(affectation_provisoire__isnull=True).count(),
+                "avec": entrants.filter(affectations_provisoires__isnull=False).distinct().count(),
+                "sans": entrants.filter(affectations_provisoires__isnull=True).count(),
             },
             "retours_par_departement": [
                 {"label": ligne["label"] or "—", "total": ligne["total"]}

@@ -32,6 +32,19 @@ const libellesPriorite = {
   tres_urgent: "Très urgent",
 };
 
+const champsSuggestionsIA = [
+  ["type_courrier", "Type de courrier"],
+  ["numero_source", "Numéro source"],
+  ["date_source", "Date source"],
+  ["categorie", "Catégorie"],
+  ["objet", "Objet"],
+  ["expediteur", "Expéditeur"],
+  ["destinataire", "Destinataire"],
+  ["priorite", "Priorité"],
+  ["date_echeance", "Date d’échéance"],
+  ["description", "Résumé"],
+];
+
 const filtresVides = {
   q: "",
   statut: "",
@@ -57,7 +70,7 @@ const formulaireVide = {
   priorite: "normal",
   date_echeance: "",
   description: "",
-  affectation_provisoire: "",
+  affectations_provisoires: [],
 };
 
 function formaterDate(valeur) {
@@ -94,6 +107,8 @@ function App() {
   const [afficherNotifications, setAfficherNotifications] = useState(false);
   const [formulaire, setFormulaire] = useState(formulaireVide);
   const [documentNumerise, setDocumentNumerise] = useState(null);
+  const [analyseEnCours, setAnalyseEnCours] = useState(false);
+  const [suggestionsIA, setSuggestionsIA] = useState(null);
   const [courrierDetail, setCourrierDetail] = useState(null);
   // Panneau d'action contextuel : { courrier, type } où type ∈
   // "rejeter" | "affectation-finale" | "retourner-dg" | "affecter-service"
@@ -710,7 +725,7 @@ function App() {
       const suivant = { ...precedent, [name]: value };
       if (name === "type_courrier") {
         suivant.categorie = value === "entrant" ? "administratif" : "reponse";
-        suivant.affectation_provisoire = "";
+        suivant.affectations_provisoires = [];
       }
       return suivant;
     });
@@ -775,6 +790,42 @@ function App() {
     }
   }
 
+  async function analyserDocument() {
+    const probleme = verifierDocument(documentNumerise);
+    if (probleme) {
+      setErreur(probleme);
+      return;
+    }
+
+    setAnalyseEnCours(true);
+    setErreur("");
+    setMessage("");
+    setSuggestionsIA(null);
+    const donnees = new FormData();
+    donnees.append("fichier", documentNumerise);
+
+    try {
+      const response = await fetch(`${API_URL}/courriers/analyser-document/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: donnees,
+      });
+      const resultat = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(resultat.detail || "Analyse du document impossible.");
+      }
+
+      const suggestions = resultat.suggestions || {};
+      setFormulaire((precedent) => ({ ...precedent, ...suggestions }));
+      setSuggestionsIA(suggestions);
+      setMessage(resultat.detail);
+    } catch (error) {
+      setErreur(error.message);
+    } finally {
+      setAnalyseEnCours(false);
+    }
+  }
+
   async function enregistrerCourrier(event) {
     event.preventDefault();
     setErreur("");
@@ -799,8 +850,8 @@ function App() {
     if (formulaire.type_courrier === "entrant") {
       donnees.date_reception = formulaire.date_reception;
       donnees.expediteur = formulaire.expediteur;
-      if (formulaire.affectation_provisoire) {
-        donnees.affectation_provisoire = Number(formulaire.affectation_provisoire);
+      if (formulaire.affectations_provisoires.length) {
+        donnees.affectations_provisoires = formulaire.affectations_provisoires.map(Number);
       }
     } else {
       donnees.destinataire = formulaire.destinataire;
@@ -836,11 +887,25 @@ function App() {
       setMessage(`Courrier ${resultat.numero} enregistré avec succès.${complement}`);
       setFormulaire(formulaireVide);
       setDocumentNumerise(null);
+      setSuggestionsIA(null);
       window.location.hash = "#/courriers";
       await chargerDonnees(token);
     } catch (error) {
       setErreur(error.message);
     }
+  }
+
+  function annulerEnregistrement(event) {
+    event.preventDefault();
+    setFormulaire({ ...formulaireVide });
+    setDocumentNumerise(null);
+    setSuggestionsIA(null);
+    setAnalyseEnCours(false);
+    setErreur("");
+    setMessage("");
+    const champFichier = document.getElementById("document_numerise");
+    if (champFichier) champFichier.value = "";
+    window.location.hash = "#/courriers";
   }
 
   // ------------------------------------------------------------------
@@ -863,7 +928,7 @@ function App() {
     if (role === "bureau_ordre") {
       return [
         ["Enregistrés aujourd'hui", courriers.filter((c) => c.date_creation?.slice(0, 10) === aujourdHui).length],
-        ["Avec affectation provisoire", courriers.filter((c) => c.affectation_provisoire).length],
+        ["Avec affectation provisoire", courriers.filter((c) => c.affectations_provisoires?.length).length],
         ["En attente de transmission", courriers.filter((c) => ["enregistre", "affect_provisoire", "rejete"].includes(c.statut)).length],
         ["À archiver", courriers.filter((c) => c.statut === "traite" || (c.type_courrier === "sortant" && c.statut === "envoye")).length],
         ["Urgents", urgents],
@@ -873,7 +938,7 @@ function App() {
       const traites = courriers.filter((c) => ["traite", "archive"].includes(c.statut)).length;
       return [
         ["En attente de validation", courriers.filter((c) => c.statut === "transmis").length],
-        ["Provisoires à confirmer", courriers.filter((c) => c.statut === "transmis" && c.affectation_provisoire).length],
+        ["Provisoires à confirmer", courriers.filter((c) => c.statut === "transmis" && c.affectations_provisoires?.length).length],
         ["Retours à réaffecter", courriers.filter((c) => c.statut === "retourne_dg").length],
         ["Urgents", urgents],
         ["Taux de traitement", `${Math.round((traites / Math.max(courriers.length, 1)) * 100)} %`],
@@ -1244,7 +1309,7 @@ function App() {
                   {departements.map((departement) => (
                     <option key={departement.id} value={departement.id}>
                       {departement.code} - {departement.nom}
-                      {courrier.affectation_provisoire === departement.id
+                      {courrier.affectations_provisoires?.includes(departement.id)
                         ? " (proposé par le Bureau d'Ordre)"
                         : ""}
                     </option>
@@ -2009,10 +2074,10 @@ function App() {
           <p><strong>Expéditeur :</strong> {courrier.expediteur || "—"}</p>
           <p><strong>Destinataire :</strong> {courrier.destinataire || "—"}</p>
           <p><strong>Date limite :</strong> {formaterDate(courrier.date_echeance)}</p>
-          {"affectation_provisoire_nom" in courrier && (
+          {"affectations_provisoires_nom" in courrier && (
             <p>
-              <strong>Affectation provisoire :</strong>{" "}
-              {courrier.affectation_provisoire_nom || "—"}
+              <strong>Affectations provisoires :</strong>{" "}
+              {courrier.affectations_provisoires_nom?.join(", ") || "—"}
             </p>
           )}
           <p><strong>Département (finale) :</strong> {courrier.departement_nom || "—"}</p>
@@ -2516,7 +2581,7 @@ function App() {
       {route === "/courriers/nouveau" && (
         <>
           <div className="barre-retour">
-            <a href="#/courriers" className="lien-retour">
+            <a href="#/courriers" className="lien-retour" onClick={annulerEnregistrement}>
               ← Retour au tableau de bord
             </a>
           </div>
@@ -2535,6 +2600,7 @@ function App() {
                   <div>
                     <label htmlFor="type_courrier">Type de courrier</label>
                     <select
+                      className="champ-select-uniforme"
                       id="type_courrier"
                       name="type_courrier"
                       value={formulaire.type_courrier}
@@ -2605,24 +2671,40 @@ function App() {
                         />
                       </div>
 
-                      <div>
-                        <label htmlFor="affectation_provisoire">
-                          Affectation provisoire (département)
-                        </label>
-                        <select
-                          id="affectation_provisoire"
-                          name="affectation_provisoire"
-                          value={formulaire.affectation_provisoire}
-                          onChange={modifierFormulaire}
-                        >
-                          <option value="">Sélectionner un département</option>
-                          {departements.map((dept) => (
-                            <option key={dept.id} value={dept.id}>
-                              {dept.code} - {dept.nom}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      <fieldset className="choix-departements">
+                        <legend>Affectations provisoires</legend>
+                        <details className="selecteur-departements">
+                          <summary>
+                            {formulaire.affectations_provisoires.length
+                              ? `${formulaire.affectations_provisoires.length} département(s) sélectionné(s)`
+                              : "Sélectionner un ou plusieurs départements"}
+                          </summary>
+                          <ul className="liste-cases-departement">
+                            {departements.map((dept) => (
+                              <li key={dept.id}>
+                                <label className="case-departement">
+                                  <input
+                                    type="checkbox"
+                                    checked={formulaire.affectations_provisoires.includes(String(dept.id))}
+                                    onChange={(event) =>
+                                      setFormulaire((precedent) => {
+                                        const selection = new Set(precedent.affectations_provisoires);
+                                        if (event.target.checked) selection.add(String(dept.id));
+                                        else selection.delete(String(dept.id));
+                                        return {
+                                          ...precedent,
+                                          affectations_provisoires: Array.from(selection),
+                                        };
+                                      })
+                                    }
+                                  />
+                                  <span>{dept.code} - {dept.nom}</span>
+                                </label>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      </fieldset>
                     </>
                   ) : (
                     <div>
@@ -2639,18 +2721,27 @@ function App() {
 
                   <div>
                     <label htmlFor="categorie">Catégorie</label>
-                    <input
+                    <select
+                      className="champ-select-uniforme"
                       id="categorie"
                       name="categorie"
                       value={formulaire.categorie}
                       onChange={modifierFormulaire}
-                      placeholder="Facture, contrat, réclamation..."
-                    />
+                    >
+                      <option value="administratif">Administratif</option>
+                      <option value="juridique">Juridique</option>
+                      <option value="financier">Financier</option>
+                      <option value="reponse">Réponse</option>
+                      <option value="demande">Demande</option>
+                      <option value="notification">Notification</option>
+                      <option value="autre">Autre</option>
+                    </select>
                   </div>
 
                   <div>
                     <label htmlFor="priorite">Priorité</label>
                     <select
+                      className="champ-select-uniforme"
                       id="priorite"
                       name="priorite"
                       value={formulaire.priorite}
@@ -2694,30 +2785,63 @@ function App() {
                     id="document_numerise"
                     type="file"
                     accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                    onChange={(event) =>
-                      setDocumentNumerise(event.target.files?.[0] || null)
-                    }
+                    onChange={(event) => {
+                      setDocumentNumerise(event.target.files?.[0] || null);
+                      setSuggestionsIA(null);
+                    }}
                   />
                   {documentNumerise && (
-                    <button
-                      type="button"
-                      className="bouton-discret petit-bouton"
-                      onClick={() => {
-                        setDocumentNumerise(null);
-                        document.getElementById("document_numerise").value = "";
-                      }}
-                    >
-                      Retirer
-                    </button>
+                    <div className="actions-analyse-document">
+                      <button
+                        type="button"
+                        className="bouton-secondaire petit-bouton"
+                        onClick={analyserDocument}
+                        disabled={analyseEnCours}
+                      >
+                        {analyseEnCours ? "Analyse locale en cours..." : "Analyser avec l'IA locale"}
+                      </button>
+                      <button
+                        type="button"
+                        className="bouton-discret petit-bouton"
+                        onClick={() => {
+                          setDocumentNumerise(null);
+                          setSuggestionsIA(null);
+                          document.getElementById("document_numerise").value = "";
+                        }}
+                        disabled={analyseEnCours}
+                      >
+                        Retirer
+                      </button>
+                    </div>
                   )}
                 </div>
+                {suggestionsIA && (
+                  <section className="suggestions-ia" aria-live="polite">
+                    <h3>Suggestions de l'IA locale</h3>
+                    <dl>
+                      {champsSuggestionsIA.map(([champ, libelle]) => (
+                        <div key={champ} className={!suggestionsIA[champ] ? "suggestion-absente" : ""}>
+                          <dt>{libelle}</dt>
+                          <dd>{suggestionsIA[champ] || "Non détecté"}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <p className="aide-champ">
+                      Les valeurs détectées ont prérempli le formulaire ci-dessus. Vérifiez-les avant l'enregistrement.
+                    </p>
+                  </section>
+                )}
                 <p className="aide-champ">
                   Formats acceptés : PDF, Word, JPG, PNG — 10 Mo maximum.
                 </p>
 
                 <div className="actions">
                   <button type="submit">Enregistrer le courrier</button>
-                  <a href="#/courriers" className="bouton-secondaire bouton-nav">
+                  <a
+                    href="#/courriers"
+                    className="bouton-secondaire bouton-nav"
+                    onClick={annulerEnregistrement}
+                  >
                     Annuler
                   </a>
                 </div>

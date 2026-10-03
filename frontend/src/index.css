@@ -259,13 +259,15 @@ textarea {
 
 input:hover,
 select:hover,
-textarea:hover {
+textarea:hover,
+.selecteur-departements summary:hover {
   border-color: #aab3d8;
 }
 
 input:focus,
 select:focus,
-textarea:focus {
+textarea:focus,
+.selecteur-departements summary:focus {
   outline: none;
   border-color: var(--indigo-500);
   background: var(--blanc);
@@ -274,6 +276,107 @@ textarea:focus {
 
 textarea {
   resize: vertical;
+}
+
+.choix-departements {
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.choix-departements legend {
+  color: var(--texte);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.selecteur-departements {
+  position: relative;
+  margin-top: 7px;
+}
+
+.champ-select-uniforme,
+.selecteur-departements summary {
+  display: block;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  padding: 11px 34px 11px 13px;
+  border: 1px solid #cfd4e6;
+  border-radius: var(--rayon-petit);
+  background-color: #fcfcfe;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m3 4 3 3 3-3' fill='none' stroke='%232b3347' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+  color: var(--texte);
+}
+
+.champ-select-uniforme {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.selecteur-departements summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.selecteur-departements summary::marker {
+  display: none;
+}
+
+.selecteur-departements summary::-webkit-details-marker {
+  display: none;
+}
+
+.selecteur-departements[open] summary {
+  border-color: var(--indigo-500);
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+  background: var(--blanc);
+}
+
+.liste-cases-departement {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  left: 0;
+  max-height: 220px;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--indigo-500);
+  border-top: 0;
+  border-radius: 0 0 var(--rayon-petit) var(--rayon-petit);
+  background: var(--blanc);
+  box-shadow: 0 10px 22px rgba(28, 38, 92, 0.15);
+  list-style: none;
+}
+
+.case-departement {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--blanc);
+  cursor: pointer;
+}
+
+.case-departement:hover {
+  border-color: #aab3d8;
+  background: var(--indigo-50);
+}
+
+.case-departement input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--indigo-600);
 }
 
 /* ------------------------------------------------------------------
@@ -419,6 +522,59 @@ button:disabled {
   padding: 7px 12px;
   font-size: 0.82rem;
   border-radius: 8px;
+}
+
+.actions-analyse-document {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.actions-analyse-document .petit-bouton {
+  margin: 0;
+}
+
+.suggestions-ia {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #cdd5ff;
+  border-radius: var(--rayon-petit);
+  background: var(--indigo-50);
+}
+
+.suggestions-ia h3 {
+  margin: 0 0 12px;
+  color: var(--indigo-900);
+  font-size: 1rem;
+}
+
+.suggestions-ia dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.suggestions-ia dl > div {
+  min-width: 0;
+}
+
+.suggestions-ia dt {
+  color: var(--texte-doux);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.suggestions-ia dd {
+  margin: 3px 0 0;
+  color: var(--texte);
+  overflow-wrap: anywhere;
+}
+
+.suggestions-ia > p:not(.aide-champ) {
+  margin: 0;
+  color: var(--texte);
 }
 
 /* ------------------------------------------------------------------
@@ -794,6 +950,8 @@ tbody tr:last-child td {
 }
 
 .champ-icone input {
+  flex: 1 1 auto;
+  width: auto;
   min-width: 0;
   height: 56px;
   padding: 0 12px 0 0;
@@ -808,12 +966,26 @@ tbody tr:last-child td {
   box-shadow: none;
 }
 
+.champ-icone input:-webkit-autofill,
+.champ-icone input:-webkit-autofill:hover,
+.champ-icone input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--texte);
+  -webkit-box-shadow: 0 0 0 1000px #fcfcfe inset;
+  box-shadow: 0 0 0 1000px #fcfcfe inset;
+  caret-color: var(--texte);
+}
+
 .basculer-mot-de-passe {
-  margin: 0 14px 0 0;
-  padding: 6px;
+  flex: 0 0 auto;
+  min-height: 56px;
+  margin: 0;
+  padding: 0 14px;
+  border-left: 1px solid #e0e2ec;
+  border-radius: 0 15px 15px 0;
   background: transparent;
   color: var(--indigo-500);
   font-size: 0.72rem;
+  white-space: nowrap;
   box-shadow: none;
 }
 

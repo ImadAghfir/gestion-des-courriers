@@ -97,13 +97,11 @@ class Courrier(models.Model):
     fichier = models.FileField(upload_to="courriers/", null=True, blank=True)
 
     # ---- Affectations (v3.3) -----------------------------------------
-    affectation_provisoire = models.ForeignKey(
+    affectations_provisoires = models.ManyToManyField(
         "services.Departement",
-        on_delete=models.SET_NULL,
-        null=True,
         blank=True,
         related_name="courriers_proposes",
-        help_text="Département probable proposé par le Bureau d'Ordre (non officiel).",
+        help_text="Départements probables proposés par le Bureau d'Ordre (non officiels).",
     )
     departement = models.ForeignKey(
         "services.Departement",
@@ -199,13 +197,10 @@ class Courrier(models.Model):
 
         # Statut initial par défaut
         if not self.statut:
-            if (
-                self.type_courrier == self.TypeCourrier.ENTRANT
-                and self.affectation_provisoire_id
-            ):
-                self.statut = self.Statut.AFFECT_PROVISOIRE
-            else:
-                self.statut = self.Statut.ENREGISTRE
+            # Une relation plusieurs-à-plusieurs est enregistrée après le
+            # courrier ; le service métier fixe donc le statut provisoire
+            # avant cette première sauvegarde lorsque nécessaire.
+            self.statut = self.Statut.ENREGISTRE
 
         super().save(*args, **kwargs)
 

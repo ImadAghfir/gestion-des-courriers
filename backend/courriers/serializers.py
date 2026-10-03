@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from unicodedata import normalize
 
 from historique.models import Historique
 from .models import Courrier
@@ -32,11 +33,14 @@ class CourrierSerializer(serializers.ModelSerializer):
 
     departement_nom = serializers.StringRelatedField(source="departement", read_only=True)
     service_nom = serializers.StringRelatedField(source="service", read_only=True)
-    affectation_provisoire_nom = serializers.StringRelatedField(
-        source="affectation_provisoire", read_only=True
+    affectations_provisoires_nom = serializers.StringRelatedField(
+        source="affectations_provisoires", many=True, read_only=True
     )
     statut_label = serializers.CharField(source="get_statut_display", read_only=True)
     historique = HistoriqueSerializer(source="historiques", many=True, read_only=True)
+    # Accepte aussi les libellés affichés dans l'interface (ex. « Demande »
+    # ou « Réponse »), puis les convertit en valeurs internes valides.
+    categorie = serializers.CharField(required=False)
 
     class Meta:
         model = Courrier
@@ -46,7 +50,7 @@ class CourrierSerializer(serializers.ModelSerializer):
             "priorite", "statut", "statut_label",
             "date_reception", "date_source", "date_echeance", "date_creation",
             "fichier",
-            "affectation_provisoire", "affectation_provisoire_nom",
+            "affectations_provisoires", "affectations_provisoires_nom",
             "departement", "departement_nom", "service", "service_nom",
             "instructions_dg", "instructions_chef_dept",
             "createur", "historique",
@@ -71,8 +75,8 @@ class CourrierSerializer(serializers.ModelSerializer):
 
         # AP-03 : affectation provisoire non visible par les Chefs
         if role not in ("admin", "dg", "secretaire", "bureau_ordre"):
-            donnees.pop("affectation_provisoire", None)
-            donnees.pop("affectation_provisoire_nom", None)
+            donnees.pop("affectations_provisoires", None)
+            donnees.pop("affectations_provisoires_nom", None)
 
         # RI-01 : instructions DG → DG, Secrétaire, Admin, Chef de Département
         if role not in ("admin", "dg", "secretaire", "chef_departement"):
@@ -108,9 +112,25 @@ class CourrierSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"destinataire": "Le destinataire est obligatoire pour un courrier sortant."}
                     )
-                if donnees.get("affectation_provisoire"):
+                if donnees.get("affectations_provisoires"):
                     raise serializers.ValidationError(
-                        {"affectation_provisoire": "L'affectation provisoire ne concerne que les courriers entrants."}
+                        {"affectations_provisoires": "L'affectation provisoire ne concerne que les courriers entrants."}
                     )
 
         return donnees
+
+    def validate_categorie(self, valeur):
+        valeur_normalisee = "".join(
+            caractere
+            for caractere in normalize("NFD", valeur.strip().casefold())
+            if not "\u0300" <= caractere <= "\u036f"
+        )
+        valeurs_autorisees = {
+            valeur for valeur, _ in Courrier.Categorie.choices
+        }
+        if valeur_normalisee not in valeurs_autorisees:
+            raise serializers.ValidationError(
+                "Choisissez une catégorie valide : administratif, juridique, "
+                "financier, réponse, demande, notification ou autre."
+            )
+        return valeur_normalisee

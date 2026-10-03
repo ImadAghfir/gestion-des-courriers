@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from services.models import Departement, Service
 
-from . import services
+from . import ai, services
 from .models import Courrier
 from .serializers import CourrierSerializer
 
@@ -44,8 +44,8 @@ class CourrierViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         utilisateur = self.request.user
         courriers = Courrier.objects.select_related(
-            "departement", "service", "affectation_provisoire", "createur"
-        ).prefetch_related("historiques__auteur")
+            "departement", "service", "createur"
+        ).prefetch_related("affectations_provisoires", "historiques__auteur")
 
         role = services._role(utilisateur)
 
@@ -138,6 +138,42 @@ class CourrierViewSet(viewsets.ModelViewSet):
     # ------------------------------------------------------------------
     # Enregistrement (Bureau d'Ordre) — §5.3.2 / §5.3.3
     # ------------------------------------------------------------------
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="analyser-document",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def analyser_document(self, request):
+        """Analyse localement un document et renvoie des champs suggérés."""
+        if services._role(request.user) not in ("admin", "bureau_ordre"):
+            return Response(
+                {"detail": "Vous n'avez pas l'autorisation d'analyser un courrier."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        fichier = request.FILES.get("fichier")
+        if not fichier:
+            return Response(
+                {"detail": "Aucun fichier fourni (champ 'fichier' attendu)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if fichier.size > 10 * 1024 * 1024:
+            return Response(
+                {"detail": "Le document dépasse la taille maximale autorisée (10 Mo)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            suggestions = ai.analyser_document(fichier)
+        except ai.AnalyseDocumentErreur as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        return Response({
+            "suggestions": suggestions,
+            "detail": "Suggestions générées localement. Vérifiez-les avant l'enregistrement.",
+        })
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

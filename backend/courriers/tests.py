@@ -86,9 +86,14 @@ class EnregistrementTest(TestCase):
     def test_affectation_provisoire_optionnelle_et_tracee(self):
         """Règles AP-01 et AP-05."""
         courrier = creer_courrier_entrant(
-            self.acteurs["bo"], affectation_provisoire=self.dept_rh
+            self.acteurs["bo"],
+            affectations_provisoires=[self.dept_rh, self.dept_fin],
         )
         self.assertEqual(courrier.statut, "affect_provisoire")
+        self.assertEqual(
+            set(courrier.affectations_provisoires.all()),
+            {self.dept_rh, self.dept_fin},
+        )
         self.assertTrue(
             Historique.objects.filter(
                 courrier=courrier, action="affect_provisoire"
@@ -110,7 +115,7 @@ class WorkflowEntrantTest(TestCase):
         (self.dept_rh, self.dept_fin, self.service_s2,
          self.service_fin1, self.acteurs) = creer_organisation()
         self.courrier = creer_courrier_entrant(
-            self.acteurs["bo"], affectation_provisoire=self.dept_rh
+            self.acteurs["bo"], affectations_provisoires=[self.dept_rh]
         )
 
     def test_cycle_complet(self):
@@ -175,7 +180,7 @@ class AffectationFinaleTest(TestCase):
         (self.dept_rh, self.dept_fin, self.service_s2,
          self.service_fin1, self.acteurs) = creer_organisation()
         self.courrier = creer_courrier_entrant(
-            self.acteurs["bo"], affectation_provisoire=self.dept_rh
+            self.acteurs["bo"], affectations_provisoires=[self.dept_rh]
         )
         regles.transmettre_au_dg(self.courrier, self.acteurs["bo"])
         regles.valider_courrier(self.courrier, self.acteurs["dg"])
@@ -191,7 +196,7 @@ class AffectationFinaleTest(TestCase):
         regles.affectation_finale(self.courrier, self.acteurs["dg"], self.dept_fin)
         self.assertEqual(self.courrier.departement, self.dept_fin)
         # L'affectation provisoire reste conservée pour traçabilité
-        self.assertEqual(self.courrier.affectation_provisoire, self.dept_rh)
+        self.assertEqual(list(self.courrier.affectations_provisoires.all()), [self.dept_rh])
 
     def test_af06_affectation_finale_tracee(self):
         regles.affectation_finale(self.courrier, self.acteurs["dg"], self.dept_rh)
@@ -445,7 +450,7 @@ class VisibiliteApiTest(APITestCase):
         (self.dept_rh, self.dept_fin, self.service_s2,
          self.service_fin1, self.acteurs) = creer_organisation()
         self.courrier = creer_courrier_entrant(
-            self.acteurs["bo"], affectation_provisoire=self.dept_rh
+            self.acteurs["bo"], affectations_provisoires=[self.dept_rh]
         )
 
     def _detail(self, acteur):
@@ -459,12 +464,12 @@ class VisibiliteApiTest(APITestCase):
 
         # Visible pour le DG
         response = self._detail("dg")
-        self.assertIn("affectation_provisoire", response.data)
+        self.assertIn("affectations_provisoires", response.data)
 
         # Invisible pour le Chef de Département
         response = self._detail("chef_rh")
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("affectation_provisoire", response.data)
+        self.assertNotIn("affectations_provisoires", response.data)
         # Instructions DG visibles par le Chef de Département (RI-01)
         self.assertIn("instructions_dg", response.data)
 
@@ -499,7 +504,7 @@ class VisibiliteApiTest(APITestCase):
                 "date_reception": "2026-08-10",
                 "expediteur": "Partenaire Y",
                 "categorie": "financier",
-                "affectation_provisoire": self.dept_fin.id,
+                "affectations_provisoires": [self.dept_fin.id],
             },
             format="json",
         )
@@ -624,3 +629,21 @@ class VisibiliteApiTest(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("numero_source", response.data)
+
+    def test_creation_accepte_le_libelle_categorie_affiche(self):
+        self.client.force_authenticate(self.acteurs["bo"])
+        response = self.client.post(
+            "/api/courriers/",
+            {
+                "type_courrier": "entrant",
+                "objet": "Candidature développeur",
+                "numero_source": "CAND-2026-001",
+                "date_source": "2026-09-08",
+                "date_reception": "2026-09-08",
+                "expediteur": "Sacha Dubois",
+                "categorie": "Demande",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["categorie"], "demande")

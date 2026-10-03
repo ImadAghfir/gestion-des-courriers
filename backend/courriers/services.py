@@ -145,9 +145,13 @@ def enregistrer_courrier(auteur, donnees_validees):
         "seul le Bureau d'Ordre peut enregistrer un courrier",
     )
 
+    affectations_provisoires = donnees_validees.pop("affectations_provisoires", [])
     courrier = Courrier(createur=auteur, **donnees_validees)
+    if affectations_provisoires:
+        courrier.statut = Courrier.Statut.AFFECT_PROVISOIRE
     courrier.full_clean(exclude=["numero", "statut", "createur"])
     courrier.save()
+    courrier.affectations_provisoires.set(affectations_provisoires)
 
     Historique.objects.create(
         courrier=courrier,
@@ -159,20 +163,21 @@ def enregistrer_courrier(auteur, donnees_validees):
         ),
     )
 
-    if courrier.affectation_provisoire:
+    if affectations_provisoires:
+        noms_departements = ", ".join(str(departement) for departement in affectations_provisoires)
         Historique.objects.create(
             courrier=courrier,
             auteur=auteur,
             action=Historique.Action.AFFECT_PROVISOIRE,
             commentaire=(
-                f"Affectation provisoire proposée → {courrier.affectation_provisoire}."
+                f"Affectations provisoires proposées → {noms_departements}."
             ),
         )
         _notifier(
             auteur,
             courrier,
             f"Courrier {courrier.numero} enregistré avec affectation provisoire "
-            f"proposée : {courrier.affectation_provisoire}.",
+            f"proposées : {noms_departements}.",
         )
 
     return courrier
@@ -324,13 +329,13 @@ def affectation_finale(courrier, auteur, departement, instructions="", commentai
         champs.append("instructions_dg")
     courrier.save(update_fields=champs)
 
-    provisoire = courrier.affectation_provisoire
+    provisoires = list(courrier.affectations_provisoires.all())
     suffixe = ""
-    if not reaffectation and provisoire:
+    if not reaffectation and provisoires:
         suffixe = (
             " (affectation provisoire acceptée)"
-            if provisoire.pk == departement.pk
-            else f" (affectation provisoire {provisoire} non retenue)"
+            if departement in provisoires
+            else " (aucune des affectations provisoires n'a été retenue)"
         )
 
     titre_auteur = "du Secrétaire" if _role(auteur) == "secretaire" else "du DG"
@@ -750,7 +755,7 @@ CHAMPS_IMMUABLES = (
 CHAMPS_MODIFIABLES = {
     "bureau_ordre": (
         "objet", "description", "expediteur", "destinataire", "categorie",
-        "priorite", "date_echeance", "fichier", "affectation_provisoire",
+        "priorite", "date_echeance", "fichier", "affectations_provisoires",
     ),
     "dg": ("priorite", "date_echeance"),
     "secretaire": ("priorite", "date_echeance"),
@@ -758,7 +763,7 @@ CHAMPS_MODIFIABLES = {
     "chef_service": (),       # notes de traitement via commenter
     "admin": (
         "objet", "description", "expediteur", "destinataire", "categorie",
-        "priorite", "date_echeance", "fichier", "affectation_provisoire",
+        "priorite", "date_echeance", "fichier", "affectations_provisoires",
         "instructions_dg", "instructions_chef_dept",
         "departement", "service",
     ),
@@ -805,6 +810,7 @@ def modifier_courrier(courrier, auteur, modifications, commentaire=""):
 
     champs_autorises = CHAMPS_MODIFIABLES[role]
     entrees = []
+    affectations_provisoires = None
 
     for champ, nouvelle_valeur in modifications.items():
         if champ in CHAMPS_IMMUABLES:
@@ -815,6 +821,17 @@ def modifier_courrier(courrier, auteur, modifications, commentaire=""):
             raise PermissionDenied(
                 f"Votre rôle ne permet pas de modifier le champ « {champ} »."
             )
+
+        if champ == "affectations_provisoires":
+            ancienne_valeur = list(courrier.affectations_provisoires.all())
+            nouvelle_valeur = list(nouvelle_valeur)
+            if {departement.pk for departement in ancienne_valeur} == {
+                departement.pk for departement in nouvelle_valeur
+            }:
+                continue
+            affectations_provisoires = nouvelle_valeur
+            entrees.append((champ, ancienne_valeur, nouvelle_valeur))
+            continue
 
         ancienne_valeur = getattr(courrier, champ)
         if ancienne_valeur == nouvelle_valeur:
@@ -828,6 +845,8 @@ def modifier_courrier(courrier, auteur, modifications, commentaire=""):
 
     courrier.full_clean(exclude=["statut", "createur"])
     courrier.save()
+    if affectations_provisoires is not None:
+        courrier.affectations_provisoires.set(affectations_provisoires)
 
     for champ, ancienne, nouvelle in entrees:
         Historique.objects.create(

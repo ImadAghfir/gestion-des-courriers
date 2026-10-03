@@ -45,7 +45,7 @@ class StatistiquesApiTest(APITestCase):
                 date_reception=date(2026, 8, 1),
                 expediteur="Organisme X",
                 categorie="administratif",
-                affectation_provisoire=self.dept_rh,
+                affectations_provisoires=[self.dept_rh],
             ),
         )
         regles.transmettre_au_dg(self.courrier, self.bo)
